@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
 import '../services/database_service.dart';
+import 'equipment_manager_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -53,27 +54,57 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildEquipmentList(DatabaseService db) {
-    return FutureBuilder<List<String>>(
-      future: db.getOwnedEquipment(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) return const CircularProgressIndicator();
-        final equipment = snapshot.data!;
-        
-        if (equipment.isEmpty) {
-          return const Card(
-            child: Padding(
-              padding: EdgeInsets.all(16.0),
-              child: Text("No equipment selected. Go to Wiki to add items."),
+  Widget _buildEquipmentList(BuildContext context, DatabaseService db) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Header with Edit Button
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text("My Equipment", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            TextButton.icon(
+              icon: const Icon(Icons.edit),
+              label: const Text("Manage"),
+              onPressed: () {
+                // Navigate to the new manager screen
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const EquipmentManagerScreen()),
+                );
+              },
             ),
-          );
-        }
+          ],
+        ),
+        const SizedBox(height: 10),
+        
+        // The List
+        FutureBuilder<List<String>>(
+          future: db.getOwnedEquipment(),
+          builder: (context, snapshot) {
+            if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+            final equipment = snapshot.data!;
+            
+            if (equipment.isEmpty) {
+              return ActionChip(
+                label: const Text("Tap to set up your Gym"),
+                avatar: const Icon(Icons.add),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const EquipmentManagerScreen()),
+                  );
+                },
+              );
+            }
 
-        return Wrap(
-          spacing: 8.0,
-          children: equipment.map((e) => Chip(label: Text(e))).toList(),
-        );
-      },
+            return Wrap(
+              spacing: 8.0,
+              children: equipment.map((e) => Chip(label: Text(e))).toList(),
+            );
+          },
+        ),
+      ],
     );
   }
 
