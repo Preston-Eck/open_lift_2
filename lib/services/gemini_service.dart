@@ -11,7 +11,7 @@ class GeminiService {
   GeminiService() {
     _model = GenerativeModel(
       model: 'gemini-pro', 
-      apiKey: 'YOUR_GEMINI_API_KEY' // Remember to keep your key here
+      apiKey: 'AIzaSyBB6vEjgpKN7fKFW-Mdi-uohyVjKXLQdcM' // Remember to keep your key here
     );
   }
 

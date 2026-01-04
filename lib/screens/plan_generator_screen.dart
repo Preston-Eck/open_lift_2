@@ -124,11 +124,10 @@ class _PlanGeneratorScreenState extends State<PlanGeneratorScreen> {
                 width: double.infinity,
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                  // FIX: The onPressed block ends here
+                  // FIX: logic is strictly inside the function body
                   onPressed: () async {
                     if (_generatedPlan != null) {
                       await context.read<DatabaseService>().savePlan(_generatedPlan!);
-                      
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(content: Text("Plan Saved Successfully!"))
@@ -137,7 +136,7 @@ class _PlanGeneratorScreenState extends State<PlanGeneratorScreen> {
                       }
                     }
                   },
-                  // FIX: 'child' is now correctly placed as a parameter of ElevatedButton, not inside the function
+                  // FIX: child is a parameter of ElevatedButton, not inside the function
                   child: const Text("Save & Activate Plan", style: TextStyle(color: Colors.white)),
                 ),
               )

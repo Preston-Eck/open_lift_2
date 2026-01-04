@@ -8,7 +8,7 @@ class AnalyticsScreen extends StatelessWidget {
   const AnalyticsScreen({super.key});
 
   double calculate1RM(double weight, int reps) {
-    // Brzycki Formula
+    // Brzycki Formula works for any unit (kg or lbs)
     if (reps == 0) return 0;
     if (reps == 1) return weight;
     return weight / (1.0278 - (0.0278 * reps));
@@ -23,9 +23,7 @@ class AnalyticsScreen extends StatelessWidget {
       builder: (context, snapshot) {
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
         
-        // Simple Volume Load Chart Logic
-        final _ = snapshot.data!;
-        // Group logs by date and sum volume, skipping implementation for brevity
+        // Note: Real app would process snapshot.data! for charts here
         
         return Scaffold(
           appBar: AppBar(title: const Text("Analytics & 1RM")),
@@ -36,6 +34,7 @@ class AnalyticsScreen extends StatelessWidget {
               children: [
                 const Text("Estimated 1RM Calculator", style: TextStyle(fontSize: 20)),
                 const SizedBox(height: 20),
+                
                 // Example 1RM Display
                 Card(
                   child: Padding(
@@ -44,10 +43,10 @@ class AnalyticsScreen extends StatelessWidget {
                       children: [
                         const Text("Recent Bench Press 1RM"),
                         Text(
-                          "${calculate1RM(100, 5).toStringAsFixed(1)} kg", 
+                          "${calculate1RM(225, 5).toStringAsFixed(1)} lbs", // <--- UPDATED to lbs
                           style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold)
                         ),
-                        const Text("Based on 100kg x 5 reps"),
+                        const Text("Based on 225 lbs x 5 reps"), // <--- UPDATED to lbs
                       ],
                     ),
                   ),
