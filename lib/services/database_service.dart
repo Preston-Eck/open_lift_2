@@ -1,7 +1,9 @@
+// lib/services/database_service.dart
 import 'package:flutter/material.dart';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 import '../models/log.dart';
+import '../models/plan.dart'; // Import the Plan model
 
 class DatabaseService extends ChangeNotifier {
   Database? _db;
@@ -18,9 +20,9 @@ class DatabaseService extends ChangeNotifier {
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 2, // Bump version
       onCreate: (db, version) async {
-        // User Equipment Table
+        // 1. Equipment
         await db.execute('''
           CREATE TABLE user_equipment (
             id TEXT PRIMARY KEY,
@@ -29,7 +31,7 @@ class DatabaseService extends ChangeNotifier {
           )
         ''');
 
-        // Workout Logs Table
+        // 2. Logs
         await db.execute('''
           CREATE TABLE workout_logs (
             id TEXT PRIMARY KEY,
@@ -41,7 +43,29 @@ class DatabaseService extends ChangeNotifier {
             timestamp TEXT
           )
         ''');
+        
+        // 3. Plans (New)
+        await db.execute('''
+          CREATE TABLE workout_plans (
+            id TEXT PRIMARY KEY,
+            name TEXT,
+            goal TEXT,
+            schedule_json TEXT
+          )
+        ''');
       },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+           await db.execute('''
+            CREATE TABLE workout_plans (
+              id TEXT PRIMARY KEY,
+              name TEXT,
+              goal TEXT,
+              schedule_json TEXT
+            )
+          ''');
+        }
+      }
     );
   }
 
@@ -73,5 +97,22 @@ class DatabaseService extends ChangeNotifier {
     final db = await database;
     final res = await db.query('workout_logs', orderBy: 'timestamp DESC');
     return res.map((e) => LogEntry.fromMap(e)).toList();
+  }
+
+  // --- Plan Methods (New) ---
+  Future<void> savePlan(WorkoutPlan plan) async {
+    final db = await database;
+    await db.insert(
+      'workout_plans', 
+      plan.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace
+    );
+    notifyListeners();
+  }
+
+  Future<List<WorkoutPlan>> getPlans() async {
+    final db = await database;
+    final res = await db.query('workout_plans');
+    return res.map((e) => WorkoutPlan.fromMap(e)).toList();
   }
 }

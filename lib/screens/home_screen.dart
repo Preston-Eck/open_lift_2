@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
 import '../services/database_service.dart';
-import 'equipment_manager_screen.dart'; // Make sure this import is here
+import 'equipment_manager_screen.dart'; 
+import 'plan_generator_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -34,6 +35,19 @@ class HomeScreen extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _buildWelcomeCard(auth.user?.email),
+            const SizedBox(height: 10),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.bolt),
+              label: const Text("Create New Plan with AI"),
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size(double.infinity, 50),
+                backgroundColor: Colors.deepPurple,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () {
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const PlanGeneratorScreen()));
+              },
+            ),
             const SizedBox(height: 20),
             // FIX: Pass 'context' as the first argument
             _buildEquipmentList(context, db),
