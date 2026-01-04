@@ -1,6 +1,8 @@
+import 'dart:io'; // Needed for Platform check
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart'; 
 import 'package:provider/provider.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart'; // Needed for Desktop Database support
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/home_screen.dart';
 import 'services/auth_service.dart';
@@ -12,10 +14,16 @@ import 'theme.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 1. Load Environment Variables
+  // 1. Initialize Database Factory for Desktop (Windows/Linux/macOS)
+  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+  }
+
+  // 2. Load Environment Variables
   await dotenv.load(fileName: ".env");
 
-  // 2. Initialize Supabase
+  // 3. Initialize Supabase
   await Supabase.initialize(
     url: dotenv.env['SUPABASE_URL']!,
     anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
@@ -41,8 +49,7 @@ class OpenLiftApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'OpenLift',
-      // FIX: Use the class name defined in lib/theme.dart
-      theme: AppTheme.darkTheme, 
+      theme: AppTheme.darkTheme,
       home: const HomeScreen(),
       debugShowCheckedModeBanner: false,
     );
