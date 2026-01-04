@@ -16,12 +16,10 @@ class GeminiService {
     }
 
     _model = GenerativeModel(
-      model: 'gemini-pro', 
+      model: 'gemini-1.5-flash-latest', 
       apiKey: apiKey
     );
   }
-
-  // ... (Rest of the file remains exactly the same)
   Future<WorkoutPlan?> generateFullPlan(String goal, String daysPerWeek, List<String> equipment) async {
     const schema = '''
     {

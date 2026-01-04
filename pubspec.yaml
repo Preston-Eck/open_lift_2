@@ -24,21 +24,22 @@ dependencies:
   # Utilities
   uuid: ^4.0.0
   shared_preferences: ^2.2.0
-  google_generative_ai: ^0.4.0
+  google_generative_ai: ^0.4.6
   audioplayers: ^5.2.1
   wakelock_plus: ^1.1.0
-  flutter_dotenv: ^5.1.0  # <--- NEW: For the App
+  flutter_dotenv: ^5.1.0 
   intl: ^0.18.0
+
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^2.0.0
   supabase: ^2.0.0
-  dotenv: ^4.2.0          # <--- NEW: For the Script
+  dotenv: ^4.2.0         
 
 flutter:
   uses-material-design: true
-  assets:                 # <--- NEW: Expose .env to Flutter
+  assets:               
     - .env
     - assets/data/exercises.json

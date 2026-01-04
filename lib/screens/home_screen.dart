@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
 import '../services/database_service.dart';
-import 'equipment_manager_screen.dart'; 
+import 'equipment_manager_screen.dart';
 import 'plan_generator_screen.dart';
-import 'saved_plans_screen.dart';
+import 'saved_plans_screen.dart'; // Import for saved plans
+import 'manual_plan_creator_screen.dart'; // FIX: Corrected import typo
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -36,7 +37,11 @@ class HomeScreen extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _buildWelcomeCard(auth.user?.email),
-            const SizedBox(height: 10),
+            const SizedBox(height: 20),
+            _buildEquipmentList(context, db),
+            const SizedBox(height: 20),
+            
+            // --- Action Buttons ---
             ElevatedButton.icon(
               icon: const Icon(Icons.bolt),
               label: const Text("Create New Plan with AI"),
@@ -49,16 +54,30 @@ class HomeScreen extends StatelessWidget {
                 Navigator.push(context, MaterialPageRoute(builder: (_) => const PlanGeneratorScreen()));
               },
             ),
+            const SizedBox(height: 10),
             ElevatedButton.icon(
-             icon: const Icon(Icons.history),
-              label: const Text("View Saved Plans"),
+              icon: const Icon(Icons.edit_note),
+              label: const Text("Create Manual Plan"),
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size(double.infinity, 50),
+                backgroundColor: Colors.blueGrey, 
+                foregroundColor: Colors.white,
+              ),
               onPressed: () {
-     // Ensure you import 'saved_plans_screen.dart' at the top
-              Navigator.push(context, MaterialPageRoute(builder: (_) => const SavedPlansScreen()));
-            },
-           ),
-            const SizedBox(height: 20),
-            _buildEquipmentList(context, db),
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const ManualPlanCreatorScreen()));
+              },
+            ),
+            const SizedBox(height: 10),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.history),
+              label: const Text("View Saved Plans"),
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size(double.infinity, 50),
+              ),
+              onPressed: () {
+                 Navigator.push(context, MaterialPageRoute(builder: (_) => const SavedPlansScreen()));
+              },
+            ),
           ],
         ),
       ),
@@ -75,7 +94,6 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  // Definition requires 2 arguments
   Widget _buildEquipmentList(BuildContext context, DatabaseService db) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
