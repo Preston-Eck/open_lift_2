@@ -10,31 +10,31 @@ const String supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXB
 void main(List<String> arguments) async {
   final client = SupabaseClient(supabaseUrl, supabaseKey);
   
-  // 1. Determine Path: Argument -> Input -> Default
+  // 1. Determine Path: Argument -> Input
   String exercisesPath;
   
   if (arguments.isNotEmpty) {
     exercisesPath = arguments.first;
   } else {
-    stdout.write('Enter the full path to the "exercises" folder (or press Enter for default): ');
+    stdout.write('Enter the full path to the "exercises" folder (drag & drop folder here): ');
     final input = stdin.readLineSync();
     if (input != null && input.isNotEmpty) {
       // Remove quotes if user dragged/dropped folder into terminal
       exercisesPath = input.replaceAll('"', '').replaceAll("'", "").trim();
     } else {
-      exercisesPath = 'assets/data/exercises'; // Default relative path
+      stdout.writeln("❌ No path provided."); // Fixed: avoid_print
+      return;
     }
   }
 
   final dir = Directory(exercisesPath);
 
   if (!dir.existsSync()) {
-    print('❌ Error: Directory not found at: $exercisesPath');
-    print('   Please check the path and try again.');
+    stdout.writeln('❌ Error: Directory not found at: $exercisesPath'); // Fixed: avoid_print
     return;
   }
 
-  print("📂 Reading files from: $exercisesPath");
+  stdout.writeln("📂 Reading files from: $exercisesPath"); // Fixed: avoid_print
   
   final List<Map<String, dynamic>> batch = [];
   int totalUploaded = 0;
@@ -63,11 +63,11 @@ void main(List<String> arguments) async {
         if (batch.length >= 100) {
           await client.from('exercises').upsert(batch, onConflict: 'name');
           totalUploaded += batch.length;
-          stdout.write('\r🚀 Uploaded $totalUploaded exercises...');
+          stdout.write('\r🚀 Uploaded $totalUploaded exercises...'); // Fixed: avoid_print
           batch.clear();
         }
       } catch (e) {
-        print("\n⚠️ Skipping file ${file.path}: $e");
+        stdout.writeln("\n⚠️ Skipping file ${file.path}: $e"); // Fixed: avoid_print
       }
     }
   }
@@ -78,5 +78,5 @@ void main(List<String> arguments) async {
     totalUploaded += batch.length;
   }
   
-  print("\n✅ Success! Total exercises imported: $totalUploaded");
+  stdout.writeln("\n✅ Success! Total exercises imported: $totalUploaded"); // Fixed: avoid_print
 }
