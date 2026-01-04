@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import this
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import '../models/plan.dart';
 import 'package:uuid/uuid.dart';
@@ -16,11 +16,13 @@ class GeminiService {
     }
 
     _model = GenerativeModel(
-      model: 'gemini-1.5-flash-latest', 
-      apiKey: apiKey
+      model: 'gemini-2.0-flash', 
+      apiKey: apiKey,
     );
   }
+
   Future<WorkoutPlan?> generateFullPlan(String goal, String daysPerWeek, List<String> equipment) async {
+    // We strictly define the JSON schema to ensure the model follows it
     const schema = '''
     {
       "name": "Name of plan",
@@ -58,6 +60,7 @@ class GeminiService {
       
       if (response.text == null) return null;
 
+      // Clean up markdown if Gemini adds it despite instructions
       String cleanedText = response.text!.replaceAll('```json', '').replaceAll('```', '').trim();
       
       final Map<String, dynamic> jsonMap = jsonDecode(cleanedText);
