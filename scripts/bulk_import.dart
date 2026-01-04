@@ -1,16 +1,23 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:supabase/supabase.dart';
-
-// CONFIGURATION (Default fallback)
-// Replace these with your actual Supabase keys or use environment variables
-const String supabaseUrl = 'https://dwtpwfwlviustmkspwms.supabase.co'; 
-const String supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR3dHB3Zndsdml1c3Rta3Nwd21zIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NzMwNjUwOSwiZXhwIjoyMDgyODgyNTA5fQ.0OrmKEdFwzJGnasuc8kbXDYUe1o_Ah1bQw396sbCAAw'; 
+import 'package:dotenv/dotenv.dart'; // Import standard dotenv
 
 void main(List<String> arguments) async {
+  // 1. Load .env file
+  final env = DotEnv(includePlatformEnvironment: true)..load();
+  
+  final supabaseUrl = env['SUPABASE_URL'];
+  final supabaseKey = env['SUPABASE_SERVICE_ROLE_KEY']; // Use Service Role for bulk writes
+
+  if (supabaseUrl == null || supabaseKey == null) {
+    stdout.writeln('❌ Error: Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env');
+    return;
+  }
+
   final client = SupabaseClient(supabaseUrl, supabaseKey);
   
-  // 1. Determine Path: Argument -> Input
+  // 2. Determine Path
   String exercisesPath;
   
   if (arguments.isNotEmpty) {
@@ -19,10 +26,9 @@ void main(List<String> arguments) async {
     stdout.write('Enter the full path to the "exercises" folder (drag & drop folder here): ');
     final input = stdin.readLineSync();
     if (input != null && input.isNotEmpty) {
-      // Remove quotes if user dragged/dropped folder into terminal
       exercisesPath = input.replaceAll('"', '').replaceAll("'", "").trim();
     } else {
-      stdout.writeln("❌ No path provided."); // Fixed: avoid_print
+      stdout.writeln("❌ No path provided.");
       return;
     }
   }
@@ -30,16 +36,16 @@ void main(List<String> arguments) async {
   final dir = Directory(exercisesPath);
 
   if (!dir.existsSync()) {
-    stdout.writeln('❌ Error: Directory not found at: $exercisesPath'); // Fixed: avoid_print
+    stdout.writeln('❌ Error: Directory not found at: $exercisesPath');
     return;
   }
 
-  stdout.writeln("📂 Reading files from: $exercisesPath"); // Fixed: avoid_print
+  stdout.writeln("📂 Reading files from: $exercisesPath");
   
   final List<Map<String, dynamic>> batch = [];
   int totalUploaded = 0;
 
-  // 2. Iterate and Upload
+  // 3. Iterate and Upload
   await for (final file in dir.list(recursive: true)) {
     if (file is File && file.path.endsWith('.json')) {
       try {
@@ -59,24 +65,22 @@ void main(List<String> arguments) async {
           'images': json['images'] ?? [],
         });
 
-        // Batch size of 100 for better performance
         if (batch.length >= 100) {
           await client.from('exercises').upsert(batch, onConflict: 'name');
           totalUploaded += batch.length;
-          stdout.write('\r🚀 Uploaded $totalUploaded exercises...'); // Fixed: avoid_print
+          stdout.write('\r🚀 Uploaded $totalUploaded exercises...');
           batch.clear();
         }
       } catch (e) {
-        stdout.writeln("\n⚠️ Skipping file ${file.path}: $e"); // Fixed: avoid_print
+        stdout.writeln("\n⚠️ Skipping file ${file.path}: $e");
       }
     }
   }
 
-  // Upload remaining items
   if (batch.isNotEmpty) {
     await client.from('exercises').upsert(batch, onConflict: 'name');
     totalUploaded += batch.length;
   }
   
-  stdout.writeln("\n✅ Success! Total exercises imported: $totalUploaded"); // Fixed: avoid_print
+  stdout.writeln("\n✅ Success! Total exercises imported: $totalUploaded");
 }

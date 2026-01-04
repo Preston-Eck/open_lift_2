@@ -1,6 +1,6 @@
-// lib/services/gemini_service.dart
 import 'dart:convert';
-import 'package:flutter/foundation.dart'; // Added for debugPrint
+import 'package:flutter/foundation.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import this
 import 'package:google_generative_ai/google_generative_ai.dart';
 import '../models/plan.dart';
 import 'package:uuid/uuid.dart';
@@ -9,16 +9,20 @@ class GeminiService {
   late final GenerativeModel _model;
 
   GeminiService() {
+    final apiKey = dotenv.env['GEMINI_API_KEY'];
+    
+    if (apiKey == null) {
+      throw Exception('GEMINI_API_KEY not found in .env file');
+    }
+
     _model = GenerativeModel(
       model: 'gemini-pro', 
-      apiKey: 'AIzaSyBB6vEjgpKN7fKFW-Mdi-uohyVjKXLQdcM' // Remember to keep your key here
+      apiKey: apiKey
     );
   }
 
-  // ... (keep getSubstitute method as is if needed, or remove if unused)
-
+  // ... (Rest of the file remains exactly the same)
   Future<WorkoutPlan?> generateFullPlan(String goal, String daysPerWeek, List<String> equipment) async {
-    // FIX: Changed to const
     const schema = '''
     {
       "name": "Name of plan",
@@ -63,7 +67,6 @@ class GeminiService {
       
       return WorkoutPlan.fromJson(jsonMap);
     } catch (e) {
-      // FIX: Use debugPrint
       debugPrint("Gemini Error: $e");
       return null;
     }

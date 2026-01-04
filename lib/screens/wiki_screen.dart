@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/exercise.dart';
+import 'exercise_detail_screen.dart'; // Ensure this exists
 
 class WikiScreen extends StatefulWidget {
   const WikiScreen({super.key});
@@ -11,6 +12,7 @@ class WikiScreen extends StatefulWidget {
 
 class _WikiScreenState extends State<WikiScreen> {
   final _supabase = Supabase.instance.client;
+  final TextEditingController _searchController = TextEditingController();
   List<Exercise> _exercises = [];
   bool _isLoading = false;
 
@@ -20,14 +22,18 @@ class _WikiScreenState extends State<WikiScreen> {
     _fetchExercises();
   }
 
-  Future<void> _fetchExercises() async {
+  Future<void> _fetchExercises([String? query]) async {
     setState(() => _isLoading = true);
     try {
-      final data = await _supabase
-          .from('exercises')
-          .select()
-          .order('name')
-          .limit(100); // Limit to 100 for performance until we add pagination
+      var dbQuery = _supabase.from('exercises').select();
+      
+      if (query != null && query.isNotEmpty) {
+        // 'ilike' performs a case-insensitive search
+        dbQuery = dbQuery.ilike('name', '%$query%');
+      }
+      
+      // Limit to 50 results to prevent UI lag
+      final data = await dbQuery.order('name').limit(50);
       
       if (mounted) {
         setState(() {
@@ -36,96 +42,72 @@ class _WikiScreenState extends State<WikiScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading exercises: $e')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  Future<void> _addExerciseDialog() async {
-    final nameController = TextEditingController();
-    final muscleController = TextEditingController();
-    
-    await showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Add Public Exercise"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameController, 
-              decoration: const InputDecoration(labelText: "Name")
-            ),
-            TextField(
-              controller: muscleController, 
-              decoration: const InputDecoration(labelText: "Primary Muscle (e.g. Chest)")
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel"),
-          ),
-          TextButton(
-            onPressed: () async {
-              if (nameController.text.isNotEmpty) {
-                try {
-                  await _supabase.from('exercises').insert({
-                    'name': nameController.text,
-                    'primary_muscles': [muscleController.text],
-                    'equipment_required': [], 
-                  });
-                  if(context.mounted) Navigator.pop(context);
-                  _fetchExercises();
-                } catch (e) {
-                  if(context.mounted) {
-                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
-                  }
-                }
-              }
-            },
-            child: const Text("Save to Wiki"),
-          )
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Community Exercise Wiki"),
-        actions: [
-          IconButton(icon: const Icon(Icons.add), onPressed: _addExerciseDialog),
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _fetchExercises),
+        title: const Text("Exercise Wiki"),
+      ),
+      body: Column(
+        children: [
+          // Search Bar
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: "Search (e.g. Bench Press)",
+                prefixIcon: const Icon(Icons.search),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.clear),
+                  onPressed: () {
+                    _searchController.clear();
+                    _fetchExercises(); // Reset list
+                  },
+                ),
+              ),
+              onSubmitted: (value) => _fetchExercises(value),
+            ),
+          ),
+          
+          // Exercise List
+          Expanded(
+            child: _isLoading 
+              ? const Center(child: CircularProgressIndicator())
+              : _exercises.isEmpty 
+                  ? const Center(child: Text("No exercises found."))
+                  : ListView.builder(
+                      itemCount: _exercises.length,
+                      itemBuilder: (context, index) {
+                        final ex = _exercises[index];
+                        final muscles = ex.primaryMuscles.isNotEmpty 
+                            ? ex.primaryMuscles.join(', ') 
+                            : 'General';
+                        
+                        return ListTile(
+                          title: Text(ex.name),
+                          subtitle: Text(muscles, maxLines: 1, overflow: TextOverflow.ellipsis),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () {
+                            Navigator.push(
+                              context, 
+                              MaterialPageRoute(builder: (_) => ExerciseDetailScreen(exercise: ex))
+                            );
+                          },
+                        );
+                      },
+                    ),
+          ),
         ],
       ),
-      body: _isLoading 
-        ? const Center(child: CircularProgressIndicator())
-        : ListView.builder(
-            itemCount: _exercises.length,
-            itemBuilder: (context, index) {
-              final ex = _exercises[index];
-              final muscles = ex.primaryMuscles.isNotEmpty 
-                  ? ex.primaryMuscles.join(', ') 
-                  : 'General';
-              
-              return ListTile(
-                title: Text(ex.name),
-                subtitle: Text("$muscles • ${ex.equipment.join(', ')}"),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  // Navigate to details (placeholder)
-                },
-              );
-            },
-          ),
     );
   }
 }

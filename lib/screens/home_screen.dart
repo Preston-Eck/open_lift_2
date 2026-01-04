@@ -4,6 +4,7 @@ import '../services/auth_service.dart';
 import '../services/database_service.dart';
 import 'equipment_manager_screen.dart'; 
 import 'plan_generator_screen.dart';
+import 'saved_plans_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -48,8 +49,15 @@ class HomeScreen extends StatelessWidget {
                 Navigator.push(context, MaterialPageRoute(builder: (_) => const PlanGeneratorScreen()));
               },
             ),
+            ElevatedButton.icon(
+             icon: const Icon(Icons.history),
+              label: const Text("View Saved Plans"),
+              onPressed: () {
+     // Ensure you import 'saved_plans_screen.dart' at the top
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const SavedPlansScreen()));
+            },
+           ),
             const SizedBox(height: 20),
-            // FIX: Pass 'context' as the first argument
             _buildEquipmentList(context, db),
           ],
         ),

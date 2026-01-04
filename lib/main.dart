@@ -1,31 +1,24 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart'; 
 import 'package:provider/provider.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'services/database_service.dart';
-import 'services/auth_service.dart';
-import 'services/workout_player_service.dart';
-import 'services/gemini_service.dart';
 import 'screens/home_screen.dart';
-import 'screens/workout_player_screen.dart';
-import 'screens/wiki_screen.dart';
-import 'screens/analytics_screen.dart';
+import 'services/auth_service.dart';
+import 'services/database_service.dart';
+import 'services/gemini_service.dart';
+import 'services/workout_player_service.dart';
 import 'theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize Windows Database
-  if (Platform.isWindows || Platform.isLinux) {
-    sqfliteFfiInit();
-    databaseFactory = databaseFactoryFfi;
-  }
+  // 1. Load Environment Variables
+  await dotenv.load(fileName: ".env");
 
-  // Initialize Supabase (Replace with your actual keys)
+  // 2. Initialize Supabase
   await Supabase.initialize(
-    url: 'https://dwtpwfwlviustmkspwms.supabase.co',
-    anonKey: 'sb_publishable_mX3GHRaThktEAfP-Z1KnMw_-lDfismH',
+    url: dotenv.env['SUPABASE_URL']!,
+    anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
   );
 
   runApp(
@@ -33,63 +26,25 @@ void main() async {
       providers: [
         ChangeNotifierProvider(create: (_) => AuthService()),
         ChangeNotifierProvider(create: (_) => DatabaseService()),
+        Provider(create: (_) => GeminiService()), 
         ChangeNotifierProvider(create: (_) => WorkoutPlayerService()),
-        Provider(create: (_) => GeminiService()),
       ],
-      child: const MyApp(),
+      child: const OpenLiftApp(),
     ),
   );
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class OpenLiftApp extends StatelessWidget {
+  const OpenLiftApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'OpenFit Wiki',
-      theme: AppTheme.darkTheme,
-      home: const MainScaffold(),
-    );
-  }
-}
-
-class MainScaffold extends StatefulWidget {
-  const MainScaffold({super.key});
-  @override
-  State<MainScaffold> createState() => _MainScaffoldState();
-}
-
-class _MainScaffoldState extends State<MainScaffold> {
-  int _currentIndex = 0;
-  final List<Widget> _screens = [
-    const HomeScreen(),
-    const WikiScreen(),
-    const AnalyticsScreen(),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: _screens[_currentIndex],
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _currentIndex,
-        onDestinationSelected: (idx) => setState(() => _currentIndex = idx),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.fitness_center), label: 'Workout'),
-          NavigationDestination(icon: Icon(Icons.library_books), label: 'Wiki'),
-          NavigationDestination(icon: Icon(Icons.show_chart), label: 'Analytics'),
-        ],
-      ),
-      floatingActionButton: _currentIndex == 0
-          ? FloatingActionButton(
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const WorkoutPlayerScreen()),
-              ),
-              child: const Icon(Icons.play_arrow),
-            )
-          : null,
+      title: 'OpenLift',
+      // FIX: Use the class name defined in lib/theme.dart
+      theme: AppTheme.darkTheme, 
+      home: const HomeScreen(),
+      debugShowCheckedModeBanner: false,
     );
   }
 }

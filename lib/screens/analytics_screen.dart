@@ -1,18 +1,12 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:intl/intl.dart';
 import '../services/database_service.dart';
 import '../models/log.dart';
 
 class AnalyticsScreen extends StatelessWidget {
   const AnalyticsScreen({super.key});
-
-  double calculate1RM(double weight, int reps) {
-    // Brzycki Formula works for any unit (kg or lbs)
-    if (reps == 0) return 0;
-    if (reps == 1) return weight;
-    return weight / (1.0278 - (0.0278 * reps));
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -23,56 +17,98 @@ class AnalyticsScreen extends StatelessWidget {
       builder: (context, snapshot) {
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
         
-        // Note: Real app would process snapshot.data! for charts here
-        
+        final logs = snapshot.data!;
+        if (logs.isEmpty) {
+          return const Center(child: Text("No workout data yet. Go lift!"));
+        }
+
+        // 1. Process Data: Group by Date -> Sum Volume
+        final Map<String, double> volumeByDate = {};
+        for (var log in logs) {
+          final dateStr = log.timestamp.split('T')[0]; 
+          volumeByDate[dateStr] = (volumeByDate[dateStr] ?? 0) + log.volumeLoad;
+        }
+
+        // 2. Convert to FlSpots for the Chart
+        final sortedDates = volumeByDate.keys.toList()..sort();
+        final spots = sortedDates.asMap().entries.map((entry) {
+          final dateString = entry.value; 
+          final volume = volumeByDate[dateString] ?? 0.0;
+          // FIX: Use the volume for Y-axis, not the date string
+          return FlSpot(entry.key.toDouble(), volume); 
+        }).toList();
+
         return Scaffold(
-          appBar: AppBar(title: const Text("Analytics & 1RM")),
+          appBar: AppBar(title: const Text("Progress Analytics")),
           body: Padding(
             padding: const EdgeInsets.all(16.0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text("Estimated 1RM Calculator", style: TextStyle(fontSize: 20)),
-                const SizedBox(height: 20),
+                const Text("Volume Progression (lbs)", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 5),
+                const Text("Total weight moved per workout session"),
+                const SizedBox(height: 30),
                 
-                // Example 1RM Display
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Column(
-                      children: [
-                        const Text("Recent Bench Press 1RM"),
-                        Text(
-                          "${calculate1RM(225, 5).toStringAsFixed(1)} lbs", // <--- UPDATED to lbs
-                          style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold)
+                // --- Volume Chart ---
+                SizedBox(
+                  height: 250,
+                  child: LineChart(
+                    LineChartData(
+                      gridData: const FlGridData(show: true, drawVerticalLine: false),
+                      titlesData: FlTitlesData(
+                        bottomTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            getTitlesWidget: (value, meta) {
+                              int index = value.toInt();
+                              if (index >= 0 && index < sortedDates.length) {
+                                final date = DateTime.parse(sortedDates[index]);
+                                return Padding(
+                                  padding: const EdgeInsets.only(top: 8.0),
+                                  child: Text(DateFormat('MM/dd').format(date), style: const TextStyle(fontSize: 10)),
+                                );
+                              }
+                              return const SizedBox();
+                            },
+                          ),
                         ),
-                        const Text("Based on 225 lbs x 5 reps"), // <--- UPDATED to lbs
+                        leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                      ),
+                      borderData: FlBorderData(show: true, border: Border.all(color: Colors.white10)),
+                      lineBarsData: [
+                        LineChartBarData(
+                          spots: spots,
+                          isCurved: true,
+                          color: Colors.blueAccent,
+                          barWidth: 4,
+                          isStrokeCapRound: true,
+                          dotData: const FlDotData(show: true),
+                          belowBarData: BarAreaData(show: true, color: Colors.blueAccent.withValues(alpha: 0.2)),
+                        ),
                       ],
                     ),
                   ),
                 ),
-                const SizedBox(height: 20),
-                const Text("Volume Progression", style: TextStyle(fontSize: 20)),
-                SizedBox(
-                  height: 200,
-                  child: LineChart(
-                    LineChartData(
-                      gridData: const FlGridData(show: false),
-                      titlesData: const FlTitlesData(show: false),
-                      borderData: FlBorderData(show: true),
-                      lineBarsData: [
-                        LineChartBarData(
-                          spots: const [
-                            FlSpot(0, 3000),
-                            FlSpot(1, 3200),
-                            FlSpot(2, 4000),
-                            FlSpot(3, 3800),
-                          ],
-                          isCurved: true,
-                          color: Colors.blue,
-                        ),
-                      ],
-                    ),
+                
+                const SizedBox(height: 30),
+                const Text("Recent Logs", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: logs.length,
+                    itemBuilder: (context, index) {
+                      final log = logs[index];
+                      final date = DateTime.parse(log.timestamp);
+                      return ListTile(
+                        dense: true,
+                        leading: Text(DateFormat('MM/dd').format(date)),
+                        title: Text(log.exerciseName),
+                        subtitle: Text("${log.weight} lbs x ${log.reps} reps"),
+                        trailing: Text("${log.volumeLoad.toInt()} vol"),
+                      );
+                    },
                   ),
                 ),
               ],
