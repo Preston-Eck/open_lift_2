@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart'; // Import this for debugPrint
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/exercise.dart';
@@ -16,7 +17,6 @@ class SeederService {
       final List<Exercise> exercises = data.map((json) => Exercise.fromJson(json)).toList();
 
       // 3. Batch Upload to Supabase (Upsert to prevent duplicates)
-      // Supabase limits batch sizes, so we chunk it.
       const int batchSize = 50;
       for (var i = 0; i < exercises.length; i += batchSize) {
         final end = (i + batchSize < exercises.length) ? i + batchSize : exercises.length;
@@ -24,13 +24,13 @@ class SeederService {
         
         await _supabase.from('exercises').upsert(
           batch.map((e) => e.toSupabaseMap()).toList(),
-          onConflict: 'name',
+          onConflict: 'name', 
         );
-        print("Uploaded batch $i to $end");
+        debugPrint("Uploaded batch $i to $end"); // Fixed: avoid_print
       }
-      print("Seeding Complete!");
+      debugPrint("Seeding Complete!"); // Fixed: avoid_print
     } catch (e) {
-      print("Error seeding data: $e");
+      debugPrint("Error seeding data: $e"); // Fixed: avoid_print
     }
   }
 }
