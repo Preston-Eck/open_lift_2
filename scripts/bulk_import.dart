@@ -1,26 +1,51 @@
 import 'dart:convert';
 import 'dart:io';
-import 'package:supabase/supabase.dart'; // Add 'supabase' to pubspec.yaml dev_dependencies if needed
+import 'package:supabase/supabase.dart';
 
-// CONFIGURATION
-const String supabaseUrl = 'YOUR_SUPABASE_URL';
-const String supabaseKey = 'YOUR_SUPABASE_SERVICE_ROLE_KEY'; // Use Service Role Key for bulk admin writes
-const String exercisesPath = 'C:/path/to/free-exercise-db-main/exercises'; // Update this path
+// CONFIGURATION (Default fallback)
+// Replace these with your actual Supabase keys or use environment variables
+const String supabaseUrl = 'https://dwtpwfwlviustmkspwms.supabase.co'; 
+const String supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR3dHB3Zndsdml1c3Rta3Nwd21zIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NzMwNjUwOSwiZXhwIjoyMDgyODgyNTA5fQ.0OrmKEdFwzJGnasuc8kbXDYUe1o_Ah1bQw396sbCAAw'; 
 
-void main() async {
+void main(List<String> arguments) async {
   final client = SupabaseClient(supabaseUrl, supabaseKey);
+  
+  // 1. Determine Path: Argument -> Input -> Default
+  String exercisesPath;
+  
+  if (arguments.isNotEmpty) {
+    exercisesPath = arguments.first;
+  } else {
+    stdout.write('Enter the full path to the "exercises" folder (or press Enter for default): ');
+    final input = stdin.readLineSync();
+    if (input != null && input.isNotEmpty) {
+      // Remove quotes if user dragged/dropped folder into terminal
+      exercisesPath = input.replaceAll('"', '').replaceAll("'", "").trim();
+    } else {
+      exercisesPath = 'assets/data/exercises'; // Default relative path
+    }
+  }
+
   final dir = Directory(exercisesPath);
+
+  if (!dir.existsSync()) {
+    print('❌ Error: Directory not found at: $exercisesPath');
+    print('   Please check the path and try again.');
+    return;
+  }
+
+  print("📂 Reading files from: $exercisesPath");
+  
   final List<Map<String, dynamic>> batch = [];
+  int totalUploaded = 0;
 
-  print("Reading files from $exercisesPath...");
-
+  // 2. Iterate and Upload
   await for (final file in dir.list(recursive: true)) {
     if (file is File && file.path.endsWith('.json')) {
       try {
         final content = await file.readAsString();
         final Map<String, dynamic> json = jsonDecode(content);
         
-        // Map JSON to DB Schema
         batch.add({
           'name': json['name'],
           'force': json['force'],
@@ -34,23 +59,24 @@ void main() async {
           'images': json['images'] ?? [],
         });
 
-        // Upload in batches of 100
+        // Batch size of 100 for better performance
         if (batch.length >= 100) {
           await client.from('exercises').upsert(batch, onConflict: 'name');
-          print("Uploaded batch of 100...");
+          totalUploaded += batch.length;
+          stdout.write('\r🚀 Uploaded $totalUploaded exercises...');
           batch.clear();
         }
       } catch (e) {
-        print("Skipping file ${file.path}: $e");
+        print("\n⚠️ Skipping file ${file.path}: $e");
       }
     }
   }
 
-  // Upload remaining
+  // Upload remaining items
   if (batch.isNotEmpty) {
     await client.from('exercises').upsert(batch, onConflict: 'name');
-    print("Uploaded final batch.");
+    totalUploaded += batch.length;
   }
   
-  print("Done!");
+  print("\n✅ Success! Total exercises imported: $totalUploaded");
 }

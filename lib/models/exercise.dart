@@ -1,58 +1,50 @@
 class Exercise {
   final String id;
   final String name;
-  final String? force;
-  final String? level;
-  final String? mechanic;
-  final String? equipment;
+  final String? category;
   final List<String> primaryMuscles;
   final List<String> secondaryMuscles;
-  final List<String> instructions;
-  final String? category;
-  final List<String> images;
+  final List<String> equipment; // Stored as array in DB
+  final String? level;
+  final String? mechanic;
 
   Exercise({
     required this.id,
     required this.name,
-    this.force,
-    this.level,
-    this.mechanic,
-    this.equipment,
+    this.category,
     required this.primaryMuscles,
     required this.secondaryMuscles,
-    required this.instructions,
-    this.category,
-    required this.images,
+    required this.equipment,
+    this.level,
+    this.mechanic,
   });
 
   factory Exercise.fromJson(Map<String, dynamic> json) {
     return Exercise(
-      id: json['id'] ?? json['name'], // Fallback if ID is missing
-      name: json['name'],
-      force: json['force'],
+      // Fallback to 'name' if 'id' is missing (common in some JSON lists)
+      id: json['id']?.toString() ?? json['name'] ?? 'unknown',
+      name: json['name'] ?? 'Unnamed Exercise',
+      category: json['category'],
+      // Handle Postgres Arrays (text[]) which come back as Lists
+      primaryMuscles: List<String>.from(json['primary_muscles'] ?? []),
+      secondaryMuscles: List<String>.from(json['secondary_muscles'] ?? []),
+      // The import script saves equipment as an array 'equipment_required'
+      equipment: List<String>.from(json['equipment_required'] ?? []),
       level: json['level'],
       mechanic: json['mechanic'],
-      equipment: json['equipment'],
-      primaryMuscles: List<String>.from(json['primaryMuscles'] ?? []),
-      secondaryMuscles: List<String>.from(json['secondaryMuscles'] ?? []),
-      instructions: List<String>.from(json['instructions'] ?? []),
-      category: json['category'],
-      images: List<String>.from(json['images'] ?? []),
     );
   }
 
+  // Helper for uploading data if needed from the app
   Map<String, dynamic> toSupabaseMap() {
     return {
       'name': name,
-      'force': force,
-      'level': level,
-      'mechanic': mechanic,
-      'equipment_required': equipment != null ? [equipment] : [], // Adapter for array
+      'category': category,
       'primary_muscles': primaryMuscles,
       'secondary_muscles': secondaryMuscles,
-      'instructions': instructions,
-      'category': category,
-      'images': images,
+      'equipment_required': equipment,
+      'level': level,
+      'mechanic': mechanic,
     };
   }
 }
