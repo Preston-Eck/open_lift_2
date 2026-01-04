@@ -68,6 +68,16 @@ class _WikiScreenState extends State<WikiScreen> {
         title: const Text("Community Exercise Wiki"),
         actions: [
           IconButton(icon: const Icon(Icons.add), onPressed: _addExerciseDialog),
+        title: const Text("Wiki"),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.cloud_upload),
+            onPressed: () async {
+              // Trigger the seed
+              await SeederService().seedInitialExercises();
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Import Started... check console")));
+          },
+         ),
         ],
       ),
       body: ListView.builder(
