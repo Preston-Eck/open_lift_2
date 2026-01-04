@@ -1,4 +1,3 @@
-// lib/screens/equipment_manager_screen.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/database_service.dart';
@@ -12,13 +11,11 @@ class EquipmentManagerScreen extends StatefulWidget {
 }
 
 class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> {
-  // We keep a local set of selected IDs for instant UI feedback
   Set<String> _localOwned = {};
 
   @override
   void initState() {
     super.initState();
-    // Load initial state
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final db = context.read<DatabaseService>();
       final owned = await db.getOwnedEquipment();
@@ -40,7 +37,6 @@ class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> {
       }
     });
     
-    // Save to SQLite
     db.updateEquipment(item, isOwned);
   }
 
@@ -50,7 +46,6 @@ class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> {
       _localOwned.addAll(bundle.equipmentTags);
     });
     
-    // Save all tags in the bundle
     for (var tag in bundle.equipmentTags) {
       db.updateEquipment(tag, true);
     }
@@ -67,7 +62,6 @@ class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16.0),
         children: [
-          // Section 1: Quick Bundles
           const Text("Quick Setup (Bundles)", 
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blueAccent)),
           const SizedBox(height: 10),
@@ -84,7 +78,6 @@ class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> {
 
           const Divider(height: 40),
 
-          // Section 2: Individual Items
           const Text("Individual Items", 
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 10),
@@ -98,7 +91,8 @@ class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> {
                 selected: isSelected,
                 onSelected: (_) => _toggleItem(item),
                 checkmarkColor: Colors.white,
-                selectedColor: Colors.green.withOpacity(0.3),
+                // FIX: Replaced withOpacity with withValues
+                selectedColor: Colors.green.withValues(alpha: 0.3),
               );
             }).toList(),
           ),

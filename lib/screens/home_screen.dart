@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
 import '../services/database_service.dart';
-import 'equipment_manager_screen.dart';
+import 'equipment_manager_screen.dart'; // Make sure this import is here
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -35,9 +35,8 @@ class HomeScreen extends StatelessWidget {
           children: [
             _buildWelcomeCard(auth.user?.email),
             const SizedBox(height: 20),
-            const Text("My Equipment", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 10),
-            _buildEquipmentList(db),
+            // FIX: Pass 'context' as the first argument
+            _buildEquipmentList(context, db),
           ],
         ),
       ),
@@ -54,11 +53,11 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
+  // Definition requires 2 arguments
   Widget _buildEquipmentList(BuildContext context, DatabaseService db) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Header with Edit Button
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -67,7 +66,6 @@ class HomeScreen extends StatelessWidget {
               icon: const Icon(Icons.edit),
               label: const Text("Manage"),
               onPressed: () {
-                // Navigate to the new manager screen
                 Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => const EquipmentManagerScreen()),
@@ -77,12 +75,10 @@ class HomeScreen extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 10),
-        
-        // The List
         FutureBuilder<List<String>>(
           future: db.getOwnedEquipment(),
           builder: (context, snapshot) {
-            if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+            if (!snapshot.hasData) return const CircularProgressIndicator();
             final equipment = snapshot.data!;
             
             if (equipment.isEmpty) {
@@ -127,11 +123,9 @@ class HomeScreen extends StatelessWidget {
           TextButton(
             onPressed: () async {
               try {
-                // Use ctx for the provider read, it's safer here
                 await ctx.read<AuthService>().signUp(emailController.text, passController.text);
                 if (ctx.mounted) Navigator.pop(ctx);
               } catch (e) {
-                // Check mounted before showing snackbar
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
                 }
