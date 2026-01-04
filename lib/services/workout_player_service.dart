@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
@@ -9,7 +8,6 @@ class WorkoutPlayerService extends ChangeNotifier {
   WorkoutState _state = WorkoutState.warmup;
   int _timerSeconds = 0;
   Timer? _timer;
-  final AudioPlayer _audioPlayer = AudioPlayer();
 
   WorkoutState get state => _state;
   int get timerSeconds => _timerSeconds;

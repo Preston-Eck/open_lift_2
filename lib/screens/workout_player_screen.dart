@@ -27,7 +27,9 @@ class WorkoutPlayerScreen extends StatelessWidget {
           // Timer Header
           Container(
             padding: const EdgeInsets.all(24),
-            color: player.state == WorkoutState.resting ? Colors.red.withOpacity(0.2) : Colors.transparent,
+            color: player.state == WorkoutState.resting 
+              ? Colors.red.withValues(alpha: 0.2) 
+              : Colors.transparent,
             child: Center(
               child: Text(
                 player.state == WorkoutState.resting 

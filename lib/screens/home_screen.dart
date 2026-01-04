@@ -96,10 +96,14 @@ class HomeScreen extends StatelessWidget {
           TextButton(
             onPressed: () async {
               try {
+                // Use ctx for the provider read, it's safer here
                 await ctx.read<AuthService>().signUp(emailController.text, passController.text);
-                if(ctx.mounted) Navigator.pop(ctx);
+                if (ctx.mounted) Navigator.pop(ctx);
               } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+                // Check mounted before showing snackbar
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+                }
               }
             },
             child: const Text("Sign Up"),
@@ -108,9 +112,11 @@ class HomeScreen extends StatelessWidget {
             onPressed: () async {
               try {
                 await ctx.read<AuthService>().signIn(emailController.text, passController.text);
-                if(ctx.mounted) Navigator.pop(ctx);
+                if (ctx.mounted) Navigator.pop(ctx);
               } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+                }
               }
             },
             child: const Text("Log In"),

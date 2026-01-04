@@ -24,7 +24,7 @@ class AnalyticsScreen extends StatelessWidget {
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
         
         // Simple Volume Load Chart Logic
-        final logs = snapshot.data!;
+        final _ = snapshot.data!;
         // Group logs by date and sum volume, skipping implementation for brevity
         
         return Scaffold(
