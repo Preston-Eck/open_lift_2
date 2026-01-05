@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/exercise.dart';
-import 'exercise_detail_screen.dart'; // Ensure this exists
+import 'exercise_detail_screen.dart';
+import 'add_exercise_screen.dart';
 
 class WikiScreen extends StatefulWidget {
   const WikiScreen({super.key});
@@ -52,8 +53,15 @@ class _WikiScreenState extends State<WikiScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Exercise Wiki"),
+      appBar: AppBar(title: const Text("Exercise Wiki")),
+      floatingActionButton: FloatingActionButton(
+        child: const Icon(Icons.add),
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const AddExerciseScreen()),
+          );
+        },
       ),
       body: Column(
         children: [

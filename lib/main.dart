@@ -11,6 +11,7 @@ import 'services/gemini_service.dart';
 import 'services/workout_player_service.dart';
 import 'theme.dart';
 
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -21,7 +22,11 @@ void main() async {
   }
 
   // 2. Load Environment Variables
-  await dotenv.load(fileName: ".env");
+  try {
+    await dotenv.load(fileName: ".env");
+  } catch (e) {
+    debugPrint("Warning: .env file not found. Supabase features may fail.");
+  }
 
   // 3. Initialize Supabase
   await Supabase.initialize(

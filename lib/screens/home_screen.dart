@@ -7,8 +7,11 @@ import 'plan_generator_screen.dart';
 import 'saved_plans_screen.dart';
 import 'manual_plan_creator_screen.dart';
 import 'body_metrics_screen.dart';
-import 'strength_profile_screen.dart'; // NEW IMPORT
+import 'strength_profile_screen.dart';
+import 'analytics_screen.dart'; 
 import 'settings_screen.dart';
+import 'wiki_screen.dart';
+import 'exercise_analytics_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -47,10 +50,26 @@ class HomeScreen extends StatelessWidget {
           children: [
             _buildWelcomeCard(auth.user?.email),
             const SizedBox(height: 20),
+            
+            GestureDetector(
+              onTap: () {
+                 Navigator.push(context, MaterialPageRoute(builder: (_) => const AnalyticsScreen()));
+              },
+              child: Card(
+                color: Colors.blueAccent.withValues(alpha: 0.1),
+                child: const ListTile(
+                  leading: Icon(Icons.show_chart, color: Colors.blueAccent, size: 30),
+                  title: Text("View Analytics", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blueAccent)),
+                  subtitle: Text("Track your volume and consistency trends"),
+                  trailing: Icon(Icons.arrow_forward_ios, size: 16, color: Colors.blueAccent),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+
             _buildEquipmentList(context, db),
             const SizedBox(height: 20),
             
-            // --- Action Buttons ---
             ElevatedButton.icon(
               icon: const Icon(Icons.bolt),
               label: const Text("Create New Plan with AI"),
@@ -87,6 +106,15 @@ class HomeScreen extends StatelessWidget {
                  Navigator.push(context, MaterialPageRoute(builder: (_) => const SavedPlansScreen()));
               },
             ),
+             const SizedBox(height: 10),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.show_chart),
+              label: const Text("Exercise Progress Scatter Plot"),
+              style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50)),
+              onPressed: () {
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const ExerciseAnalyticsScreen()));
+              },
+            ),
             const SizedBox(height: 10),
             Row(
               children: [
@@ -104,7 +132,7 @@ class HomeScreen extends StatelessWidget {
                 Expanded(
                   child: ElevatedButton.icon(
                     icon: const Icon(Icons.fitness_center),
-                    label: const Text("Strength Profile"),
+                    label: const Text("Strength"),
                     style: ElevatedButton.styleFrom(minimumSize: const Size(0, 50)),
                     onPressed: () {
                       Navigator.push(context, MaterialPageRoute(builder: (_) => const StrengthProfileScreen()));
@@ -112,6 +140,15 @@ class HomeScreen extends StatelessWidget {
                   ),
                 ),
               ],
+            ),
+             const SizedBox(height: 10),
+             ElevatedButton.icon(
+              icon: const Icon(Icons.menu_book),
+              label: const Text("Exercise Wiki"),
+              style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50)),
+              onPressed: () {
+                 Navigator.push(context, MaterialPageRoute(builder: (_) => const WikiScreen()));
+              },
             ),
           ],
         ),
