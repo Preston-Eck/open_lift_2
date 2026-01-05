@@ -1,5 +1,4 @@
-// lib/models/plan.dart
-import 'dart:convert'; // Kept for jsonEncode usage below
+import 'dart:convert'; 
 
 class WorkoutPlan {
   final String id;
@@ -14,13 +13,11 @@ class WorkoutPlan {
     required this.days,
   });
 
-  // Convert to Map for Database
   Map<String, dynamic> toMap() {
     return {
       'id': id,
       'name': name,
       'goal': goal,
-      // Store complex list as a JSON string for SQLite
       'schedule_json': jsonEncode(days.map((x) => x.toMap()).toList()),
     };
   }
@@ -38,7 +35,6 @@ class WorkoutPlan {
     );
   }
   
-  // For Gemini parsing (keeps existing logic)
   factory WorkoutPlan.fromJson(Map<String, dynamic> json) {
     return WorkoutPlan(
       id: json['id'] ?? '',
@@ -77,12 +73,16 @@ class WorkoutExercise {
   final int sets;
   final String reps;
   final int restSeconds;
+  final String? intensity;
+  final int secondsPerSet; // New field for Timed Exercises
 
   WorkoutExercise({
     required this.name,
     required this.sets,
     required this.reps,
     required this.restSeconds,
+    this.intensity,
+    this.secondsPerSet = 0,
   });
 
   Map<String, dynamic> toMap() => {
@@ -90,6 +90,8 @@ class WorkoutExercise {
     'sets': sets,
     'reps': reps,
     'restSeconds': restSeconds,
+    'intensity': intensity,
+    'secondsPerSet': secondsPerSet,
   };
 
   factory WorkoutExercise.fromMap(Map<String, dynamic> map) {
@@ -98,6 +100,8 @@ class WorkoutExercise {
       sets: map['sets'] ?? 3,
       reps: map['reps']?.toString() ?? '10',
       restSeconds: map['restSeconds'] ?? 60,
+      intensity: map['intensity'],
+      secondsPerSet: map['secondsPerSet'] ?? 0,
     );
   }
 }

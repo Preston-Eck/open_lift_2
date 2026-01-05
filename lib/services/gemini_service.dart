@@ -22,7 +22,6 @@ class GeminiService {
   }
 
   Future<WorkoutPlan?> generateFullPlan(String goal, String daysPerWeek, List<String> equipment) async {
-    // We strictly define the JSON schema to ensure the model follows it
     const schema = '''
     {
       "name": "Name of plan",
@@ -35,7 +34,8 @@ class GeminiService {
               "name": "Exercise Name",
               "sets": 3,
               "reps": "8-12",
-              "restSeconds": 90
+              "restSeconds": 90,
+              "intensity": "75%"
             }
           ]
         }
@@ -47,6 +47,8 @@ class GeminiService {
       You are an expert fitness coach API. 
       Create a $daysPerWeek-day split workout plan for a user with goal: "$goal".
       They ONLY have access to: ${equipment.join(', ')}.
+      
+      For the "intensity" field, suggest a target percentage of 1RM (e.g. "75%") OR an RPE (e.g. "RPE 8") appropriate for the goal.
       
       STRICTLY return ONLY valid JSON matching this schema:
       $schema
@@ -60,7 +62,6 @@ class GeminiService {
       
       if (response.text == null) return null;
 
-      // Clean up markdown if Gemini adds it despite instructions
       String cleanedText = response.text!.replaceAll('```json', '').replaceAll('```', '').trim();
       
       final Map<String, dynamic> jsonMap = jsonDecode(cleanedText);

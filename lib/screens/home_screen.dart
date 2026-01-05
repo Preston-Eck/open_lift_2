@@ -4,8 +4,9 @@ import '../services/auth_service.dart';
 import '../services/database_service.dart';
 import 'equipment_manager_screen.dart';
 import 'plan_generator_screen.dart';
-import 'saved_plans_screen.dart'; // Import for saved plans
-import 'manual_plan_creator_screen.dart'; // FIX: Corrected import typo
+import 'saved_plans_screen.dart';
+import 'manual_plan_creator_screen.dart';
+import 'body_metrics_screen.dart'; // FIX: Add this import
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -76,6 +77,18 @@ class HomeScreen extends StatelessWidget {
               ),
               onPressed: () {
                  Navigator.push(context, MaterialPageRoute(builder: (_) => const SavedPlansScreen()));
+              },
+            ),
+            const SizedBox(height: 10),
+            // FIX: Added Body Metrics Button
+            ElevatedButton.icon(
+              icon: const Icon(Icons.monitor_weight),
+              label: const Text("Body Metrics & Stats"),
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size(double.infinity, 50),
+              ),
+              onPressed: () {
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const BodyMetricsScreen()));
               },
             ),
           ],
