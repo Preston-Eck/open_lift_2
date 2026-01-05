@@ -32,6 +32,7 @@
 5.  **Equipment Manager:** Toggle owned equipment to filter AI generation.
 6.  **Settings:** User profile inputs (Age, Height, Gender, Fitness Level) stored in `SharedPreferences`.
 7.  **Wiki Integration:** Links exercises to Supabase `exercises` table for details.
+8.  **Analytics Backend:** SQLite aggregation queries for Weekly Volume, Consistency (Frequency), and Exercise Popularity implemented in `DatabaseService`.
 
 ## 4. Roadmap (Intended Outcomes)
 The app is NOT complete until these features are active:

@@ -169,4 +169,54 @@ class DatabaseService extends ChangeNotifier {
     final res = await db.query('body_metrics', orderBy: 'date DESC');
     return res.map((e) => BodyMetric.fromMap(e)).toList();
   }
+
+  // --- ANALYTICS METHODS ---
+
+  /// Calculates total volume load (Weight * Reps) per week.
+  /// Returns a list of maps: {'week_start': '2023-10-23', 'total_volume': 5000.0}
+  /// Fitness Logic: Tracks if the user is doing more work over time (Volume Progression).
+  Future<List<Map<String, dynamic>>> getWeeklyVolume() async {
+    final db = await database;
+    
+    // SQLite query to group logs by ISO-8601 Week
+    // We use substr to get YYYY-MM-DD from timestamp for date calculations
+    // strftime('%W') returns week number (00-53)
+    return await db.rawQuery('''
+      SELECT 
+        date(timestamp, 'weekday 0', '-6 days') as week_start,
+        SUM(volume_load) as total_volume
+      FROM workout_logs 
+      GROUP BY strftime('%Y-%W', timestamp)
+      ORDER BY week_start ASC
+      LIMIT 12 -- Show last 12 weeks for relevance
+    ''');
+  }
+
+  /// Calculates how many unique days the user worked out per week.
+  /// Fitness Logic: Tracks Consistency (Hierarchy #1). Target is typically 2-4x/week.
+  Future<List<Map<String, dynamic>>> getWeeklyConsistency() async {
+    final db = await database;
+    
+    return await db.rawQuery('''
+      SELECT 
+        date(timestamp, 'weekday 0', '-6 days') as week_start,
+        COUNT(DISTINCT substr(timestamp, 1, 10)) as days_active
+      FROM workout_logs 
+      GROUP BY strftime('%Y-%W', timestamp)
+      ORDER BY week_start ASC
+      LIMIT 12
+    ''');
+  }
+
+  /// Gets the top 5 exercises by volume to see what the user focuses on.
+  Future<List<Map<String, dynamic>>> getMostFrequentExercises() async {
+    final db = await database;
+    return await db.rawQuery('''
+      SELECT exercise_name, COUNT(*) as count 
+      FROM workout_logs 
+      GROUP BY exercise_name 
+      ORDER BY count DESC 
+      LIMIT 5
+    ''');
+  }
 }
