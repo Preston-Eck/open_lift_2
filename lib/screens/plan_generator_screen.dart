@@ -18,23 +18,25 @@ class _PlanGeneratorScreenState extends State<PlanGeneratorScreen> {
   bool _isLoading = false;
   WorkoutPlan? _generatedPlan;
 
+  /// Main function to gather data and call the AI
   Future<void> _generatePlan() async {
+    // 1. Update UI to show loading state
     setState(() {
       _isLoading = true;
-      _generatedPlan = null; // Reset previous plan
+      _generatedPlan = null; 
     });
 
     final db = context.read<DatabaseService>();
     final gemini = context.read<GeminiService>();
     
     try {
-      // 1. Get Equipment
+      // 2. Fetch User Equipment (Critical: Don't suggest machines if user only has dumbbells)
       final equipment = await db.getOwnedEquipment();
       if (equipment.isEmpty) {
         throw Exception("Please add equipment in the Dashboard first!");
       }
 
-      // 2. Get User Profile
+      // 3. Fetch User Profile (Age, Gender, etc. from Settings)
       final prefs = await SharedPreferences.getInstance();
       final userProfile = {
         'Age': prefs.getString('user_age') ?? 'Unknown',
@@ -44,21 +46,30 @@ class _PlanGeneratorScreenState extends State<PlanGeneratorScreen> {
         'Fitness Level': prefs.getString('user_fitness_level') ?? 'Intermediate',
       };
 
-      // 3. Call AI
+      // 4. Fetch Strength Stats (NEW: Get 1RMs from Database)
+      final oneRepMaxes = await db.getLatestOneRepMaxes();
+      // Format map into readable string: "Bench Press: 200.0, Squat: 315.0"
+      final strengthStats = oneRepMaxes.isEmpty 
+          ? "No recorded strength data (assume beginner)"
+          : oneRepMaxes.entries.map((e) => "${e.key}: ${e.value}lbs").join(", ");
+
+      // 5. Call AI with all the gathered context
       final plan = await gemini.generateFullPlan(
         _goalController.text.isEmpty ? "General Fitness" : _goalController.text,
         _daysPerWeek,
         equipment,
         userProfile,
+        strengthStats, // <--- Passing the new data here
       );
       
+      // 6. Update UI with the result
       setState(() {
         _generatedPlan = plan;
       });
 
     } catch (e) {
+      // 7. Handle Errors Gracefully
       if (mounted) {
-        // Show Detailed Error Dialog
         showDialog(
           context: context,
           builder: (ctx) => AlertDialog(
@@ -71,6 +82,7 @@ class _PlanGeneratorScreenState extends State<PlanGeneratorScreen> {
         );
       }
     } finally {
+      // 8. Stop loading spinner regardless of success/failure
       if (mounted) setState(() => _isLoading = false);
     }
   }
