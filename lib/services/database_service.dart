@@ -4,7 +4,7 @@ import 'package:sqflite/sqflite.dart';
 import '../models/log.dart';
 import '../models/plan.dart'; 
 import '../models/body_metric.dart';
-import '../models/exercise.dart'; // FIXED: Added missing import
+import '../models/exercise.dart'; 
 
 class DatabaseService extends ChangeNotifier {
   Database? _db;
@@ -21,7 +21,7 @@ class DatabaseService extends ChangeNotifier {
 
     return await openDatabase(
       path,
-      version: 6, // Bumped for custom_exercises
+      version: 6, 
       onCreate: (db, version) async {
         await _createTables(db);
       },
@@ -106,6 +106,18 @@ class DatabaseService extends ChangeNotifier {
       ORDER BY count DESC 
       LIMIT 5
     ''');
+  }
+
+  // NEW METHOD FOR SCATTER PLOT
+  Future<List<LogEntry>> getHistoryForExercise(String exerciseName) async {
+    final db = await database;
+    final res = await db.query(
+      'workout_logs',
+      where: 'exercise_name = ?',
+      whereArgs: [exerciseName],
+      orderBy: 'timestamp DESC'
+    );
+    return res.map((e) => LogEntry.fromMap(e)).toList();
   }
 
   // --- CUSTOM EXERCISES ---

@@ -44,5 +44,5 @@ flutter:
   assets:               
     - .env
     - assets/data/exercises.json
-    - assets/beep.mp3       
-    - assets/beep_long.mp3  
+    - assets/beep.mp3
+    - assets/beep_long.mp3 

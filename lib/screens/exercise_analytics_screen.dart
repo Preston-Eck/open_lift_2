@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../services/database_service.dart';
+import '../models/log.dart';
 
 class ExerciseAnalyticsScreen extends StatefulWidget {
   const ExerciseAnalyticsScreen({super.key});
@@ -12,128 +13,310 @@ class ExerciseAnalyticsScreen extends StatefulWidget {
 }
 
 class _ExerciseAnalyticsScreenState extends State<ExerciseAnalyticsScreen> {
+  // Data State
   String? _selectedExercise;
-  List<Map<String, dynamic>> _chartData = [];
+  List<LogEntry> _fullHistory = [];
+  List<LogEntry> _filteredHistory = [];
+  List<Map<String, dynamic>> _exerciseList = [];
+  
+  // Filter State
+  String _searchQuery = "";
+  DateTime _startDate = DateTime.now().subtract(const Duration(days: 365)); // Default 12 months
+  DateTime _endDate = DateTime.now();
+  
+  // Axis Configuration
+  double? _minWeight;
+  double? _maxWeight;
+  double? _minReps;
+  double? _maxReps;
 
   @override
   void initState() {
     super.initState();
-    // Use addPostFrameCallback to safely access context after init
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadInitialData();
+      _loadExerciseList();
     });
   }
 
-  Future<void> _loadInitialData() async {
-    if (!mounted) return;
+  Future<void> _loadExerciseList() async {
     final db = Provider.of<DatabaseService>(context, listen: false);
-    final exercises = await db.getMostFrequentExercises();
-    
-    if (mounted && exercises.isNotEmpty) {
-      _selectExercise(exercises.first['exercise_name']);
+    final list = await db.getMostFrequentExercises();
+    if (mounted) {
+      setState(() {
+        _exerciseList = list;
+        if (list.isNotEmpty) {
+          _selectExercise(list.first['exercise_name']);
+        }
+      });
     }
   }
 
-  Future<void> _selectExercise(String exerciseName) async {
-    if (!mounted) return;
+  Future<void> _selectExercise(String name) async {
     final db = Provider.of<DatabaseService>(context, listen: false);
-    final history = await db.getHistory();
+    // Ensure getHistoryForExercise is implemented in DatabaseService
+    final history = await db.getHistoryForExercise(name);
     
-    final data = history
-        .where((log) => log.exerciseName == exerciseName)
-        .map((log) => {
-              'weight': log.weight,
-              'reps': log.reps,
-              'date': DateTime.parse(log.timestamp),
-            })
-        .toList();
+    if (!mounted) return;
 
-    if (mounted) {
-      setState(() {
-        _selectedExercise = exerciseName;
-        _chartData = data;
-      });
-    }
+    setState(() {
+      _selectedExercise = name;
+      _fullHistory = history;
+      _applyFilters();
+    });
+  }
+
+  void _applyFilters() {
+    setState(() {
+      _filteredHistory = _fullHistory.where((log) {
+        final date = DateTime.parse(log.timestamp);
+        return date.isAfter(_startDate) && date.isBefore(_endDate.add(const Duration(days: 1)));
+      }).toList();
+    });
+  }
+
+  void _resetAxis() {
+    setState(() {
+      _minWeight = null;
+      _maxWeight = null;
+      _minReps = null;
+      _maxReps = null;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Exercise Performance")),
+      appBar: AppBar(
+        title: Text(_selectedExercise ?? "Analytics"),
+        actions: [
+          Builder(builder: (context) {
+            return IconButton(
+              icon: const Icon(Icons.settings),
+              onPressed: () => Scaffold.of(context).openEndDrawer(),
+              tooltip: "Settings & Exercises",
+            );
+          }),
+        ],
+      ),
+      endDrawer: _buildControlPanel(),
       body: Column(
         children: [
+          // --- Filter Summary Chip ---
           Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: ElevatedButton.icon(
-              icon: const Icon(Icons.search),
-              label: Text(_selectedExercise ?? "Select Exercise"),
-              onPressed: () => _showExercisePicker(context),
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+            child: Row(
+              children: [
+                Chip(
+                  label: Text("Date: ${DateFormat('MM/yy').format(_startDate)} - ${DateFormat('MM/yy').format(_endDate)}"),
+                  onDeleted: () {
+                     setState(() {
+                       _startDate = DateTime.now().subtract(const Duration(days: 365));
+                       _endDate = DateTime.now();
+                       _applyFilters();
+                     });
+                  },
+                ),
+                const SizedBox(width: 8),
+                if (_filteredHistory.isNotEmpty)
+                  Text("${_filteredHistory.length} sets", style: const TextStyle(color: Colors.grey)),
+              ],
             ),
           ),
-          if (_chartData.isNotEmpty) ...[
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(24.0),
-                child: ScatterChart(
-                  ScatterChartData(
-                    scatterSpots: _chartData.map((d) {
-                      return ScatterSpot(
-                        d['weight'], 
-                        (d['reps'] as int).toDouble(),
-                        radius: 8,
-                      );
-                    }).toList(),
-                    titlesData: const FlTitlesData(
-                      bottomTitles: AxisTitles(
-                        axisNameWidget: Text("Weight (lbs)"),
-                        sideTitles: SideTitles(showTitles: true, reservedSize: 30),
-                      ),
-                      leftTitles: AxisTitles(
-                        axisNameWidget: Text("Reps"),
-                        sideTitles: SideTitles(showTitles: true, reservedSize: 30),
-                      ),
-                      topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                      rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    ),
-                    borderData: FlBorderData(
-                      show: true, 
-                      border: Border.all(color: Colors.grey.withValues(alpha: 0.2))
-                    ),
-                    gridData: const FlGridData(show: true),
-                    // Removed manual touchData configuration to prevent version conflicts
+          
+          // --- Main Chart ---
+          Expanded(
+            child: _filteredHistory.isEmpty
+                ? const Center(child: Text("No data for selected range."))
+                : Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 24, 32, 16),
+                    child: _buildScatterChart(),
                   ),
-                ),
-              ),
-            ),
-             const Padding(
-              padding: EdgeInsets.only(bottom: 20.0),
-              child: Text("X: Weight  |  Y: Reps", style: TextStyle(color: Colors.grey)),
-            ),
-          ] else 
-            const Expanded(child: Center(child: Text("No data found for this exercise"))),
+          ),
         ],
       ),
     );
   }
 
-  void _showExercisePicker(BuildContext context) async {
-    final db = Provider.of<DatabaseService>(context, listen: false);
-    final exercises = await db.getMostFrequentExercises();
-    
-    if (!mounted) return;
+  Widget _buildControlPanel() {
+    return Drawer(
+      width: 320,
+      child: Column(
+        children: [
+          const DrawerHeader(
+            decoration: BoxDecoration(color: Colors.blueAccent),
+            child: Center(child: Text("Controls", style: TextStyle(color: Colors.white, fontSize: 24))),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                // 1. Date Range Section
+                const Text("Date Range", style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 10),
+                OutlinedButton(
+                  onPressed: () async {
+                    final picked = await showDateRangePicker(
+                      context: context,
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime.now(),
+                      initialDateRange: DateTimeRange(start: _startDate, end: _endDate),
+                    );
+                    if (picked != null) {
+                      setState(() {
+                        _startDate = picked.start;
+                        _endDate = picked.end;
+                        _applyFilters();
+                      });
+                    }
+                  },
+                  child: const Text("Select Dates"),
+                ),
+                const Divider(height: 30),
 
-    showModalBottomSheet(
-      context: context,
-      builder: (_) => ListView.builder(
-        itemCount: exercises.length,
-        itemBuilder: (_, i) => ListTile(
-          title: Text(exercises[i]['exercise_name']),
-          onTap: () {
-            Navigator.pop(context);
-            _selectExercise(exercises[i]['exercise_name']);
-          },
+                // 2. Axis Configuration Section
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text("Axis Settings", style: TextStyle(fontWeight: FontWeight.bold)),
+                    TextButton(onPressed: _resetAxis, child: const Text("Reset"))
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(child: _buildNumInput("Min Lbs", (v) => setState(() => _minWeight = v))),
+                    const SizedBox(width: 10),
+                    Expanded(child: _buildNumInput("Max Lbs", (v) => setState(() => _maxWeight = v))),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(child: _buildNumInput("Min Reps", (v) => setState(() => _minReps = v))),
+                    const SizedBox(width: 10),
+                    Expanded(child: _buildNumInput("Max Reps", (v) => setState(() => _maxReps = v))),
+                  ],
+                ),
+                const Divider(height: 30),
+
+                // 3. Exercise List Section
+                const Text("Select Exercise", style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 10),
+                TextField(
+                  decoration: const InputDecoration(
+                    labelText: "Search",
+                    prefixIcon: Icon(Icons.search),
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  onChanged: (v) => setState(() => _searchQuery = v),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  height: 300, 
+                  child: ListView.builder(
+                    itemCount: _exerciseList.length,
+                    itemBuilder: (ctx, i) {
+                      final ex = _exerciseList[i];
+                      if (_searchQuery.isNotEmpty && 
+                          !ex['exercise_name'].toString().toLowerCase().contains(_searchQuery.toLowerCase())) {
+                        return const SizedBox.shrink();
+                      }
+                      final isSelected = ex['exercise_name'] == _selectedExercise;
+                      return ListTile(
+                        title: Text(ex['exercise_name']),
+                        selected: isSelected,
+                        selectedColor: Colors.blueAccent,
+                        trailing: Text("${ex['count']}"),
+                        onTap: () {
+                           _selectExercise(ex['exercise_name']);
+                           Navigator.pop(context);
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNumInput(String label, Function(double?) onChanged) {
+    return TextField(
+      keyboardType: TextInputType.number,
+      decoration: InputDecoration(labelText: label, border: const OutlineInputBorder(), isDense: true),
+      onSubmitted: (val) {
+        if (val.isEmpty) {
+          onChanged(null);
+        } else {
+          onChanged(double.tryParse(val));
+        }
+      },
+    );
+  }
+
+  Widget _buildScatterChart() {
+    double autoMaxY = 0;
+    double autoMaxX = 0;
+    for (var log in _filteredHistory) {
+      if (log.reps > autoMaxY) autoMaxY = log.reps.toDouble();
+      if (log.weight > autoMaxX) autoMaxX = log.weight;
+    }
+
+    return ScatterChart(
+      ScatterChartData(
+        scatterSpots: _filteredHistory.map((log) {
+          return ScatterSpot(
+            log.weight,
+            log.reps.toDouble(),
+            radius: 8,
+            color: _getDateColor(DateTime.parse(log.timestamp)),
+          );
+        }).toList(),
+        minX: _minWeight ?? 0,
+        maxX: _maxWeight ?? (autoMaxX * 1.1),
+        minY: _minReps ?? 0,
+        maxY: _maxReps ?? (autoMaxY * 1.1),
+        gridData: const FlGridData(show: true),
+        titlesData: FlTitlesData(
+          bottomTitles: AxisTitles(
+            axisNameWidget: const Text("Weight (lbs)"),
+            sideTitles: SideTitles(showTitles: true, reservedSize: 30, getTitlesWidget: (val, meta) => Text(val.toInt().toString())),
+          ),
+          leftTitles: AxisTitles(
+            axisNameWidget: const Text("Reps"),
+            sideTitles: SideTitles(showTitles: true, reservedSize: 30, getTitlesWidget: (val, meta) => Text(val.toInt().toString())),
+          ),
+          topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        ),
+        borderData: FlBorderData(show: true, border: Border.all(color: Colors.grey.withValues(alpha: 0.2))),
+        
+        // --- FIX IS HERE ---
+        scatterTouchData: ScatterTouchData(
+          enabled: true,
+          touchTooltipData: ScatterTouchTooltipData(
+            tooltipBgColor: Colors.grey[800], // Corrected property for older v0.63.0 API
+            getTooltipItems: (ScatterSpot spot) {
+              return ScatterTooltipItem(
+                "${spot.x.toInt()} lbs\n${spot.y.toInt()} reps",
+                textStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              );
+            },
+          ),
         ),
       ),
     );
+  }
+
+  Color _getDateColor(DateTime date) {
+    final daysOld = DateTime.now().difference(date).inDays;
+    if (daysOld < 7) return Colors.greenAccent; 
+    if (daysOld < 30) return Colors.blueAccent; 
+    if (daysOld < 90) return Colors.orangeAccent;
+    return Colors.grey.withValues(alpha: 0.3);
   }
 }
