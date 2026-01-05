@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import '../models/plan.dart';
@@ -10,7 +9,6 @@ class GeminiService {
 
   GeminiService() {
     final apiKey = dotenv.env['GEMINI_API_KEY'];
-    
     if (apiKey == null) {
       throw Exception('GEMINI_API_KEY not found in .env file');
     }
@@ -21,7 +19,19 @@ class GeminiService {
     );
   }
 
-  Future<WorkoutPlan?> generateFullPlan(String goal, String daysPerWeek, List<String> equipment) async {
+  // Updated signature to accept userProfile map
+  Future<WorkoutPlan?> generateFullPlan(
+    String goal, 
+    String daysPerWeek, 
+    List<String> equipment,
+    Map<String, String> userProfile
+  ) async {
+    
+    // Construct profile string for prompt
+    final profileString = userProfile.entries
+        .map((e) => "${e.key}: ${e.value}")
+        .join(', ');
+
     const schema = '''
     {
       "name": "Name of plan",
@@ -35,7 +45,8 @@ class GeminiService {
               "sets": 3,
               "reps": "8-12",
               "restSeconds": 90,
-              "intensity": "75%"
+              "intensity": "75%",
+              "secondsPerSet": 0
             }
           ]
         }
@@ -46,9 +57,13 @@ class GeminiService {
     final prompt = '''
       You are an expert fitness coach API. 
       Create a $daysPerWeek-day split workout plan for a user with goal: "$goal".
+      
+      User Profile: $profileString
+      
       They ONLY have access to: ${equipment.join(', ')}.
       
-      For the "intensity" field, suggest a target percentage of 1RM (e.g. "75%") OR an RPE (e.g. "RPE 8") appropriate for the goal.
+      For "intensity", suggest a target percentage of 1RM (e.g. "75%") OR an RPE (e.g. "RPE 8").
+      For "secondsPerSet", use 0 for normal reps. Use >0 (e.g. 60) ONLY for time-based exercises like Planks.
       
       STRICTLY return ONLY valid JSON matching this schema:
       $schema
@@ -56,21 +71,22 @@ class GeminiService {
       Do not include markdown formatting (```json), just the raw JSON string.
     ''';
 
-    try {
-      final content = [Content.text(prompt)];
-      final response = await _model.generateContent(content);
-      
-      if (response.text == null) return null;
+    // REMOVED TRY/CATCH: Let errors propagate to UI
+    final content = [Content.text(prompt)];
+    final response = await _model.generateContent(content);
+    
+    if (response.text == null) {
+      throw Exception("AI returned empty response");
+    }
 
-      String cleanedText = response.text!.replaceAll('```json', '').replaceAll('```', '').trim();
-      
+    String cleanedText = response.text!.replaceAll('```json', '').replaceAll('```', '').trim();
+    
+    try {
       final Map<String, dynamic> jsonMap = jsonDecode(cleanedText);
       jsonMap['id'] = const Uuid().v4();
-      
       return WorkoutPlan.fromJson(jsonMap);
     } catch (e) {
-      debugPrint("Gemini Error: $e");
-      return null;
+      throw Exception("Failed to parse AI response: $e");
     }
   }
 }

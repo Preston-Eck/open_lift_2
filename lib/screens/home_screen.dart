@@ -6,7 +6,8 @@ import 'equipment_manager_screen.dart';
 import 'plan_generator_screen.dart';
 import 'saved_plans_screen.dart';
 import 'manual_plan_creator_screen.dart';
-import 'body_metrics_screen.dart'; // FIX: Add this import
+import 'body_metrics_screen.dart';
+import 'settings_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -20,6 +21,13 @@ class HomeScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text("Dashboard"),
         actions: [
+          // NEW: Settings Button
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
+            },
+          ),
           if (auth.isAuthenticated)
             IconButton(
               icon: const Icon(Icons.logout),

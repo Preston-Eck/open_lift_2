@@ -37,9 +37,12 @@ dev_dependencies:
   flutter_lints: ^2.0.0
   supabase: ^2.0.0
   dotenv: ^4.2.0         
+  http: ^1.6.0
 
 flutter:
   uses-material-design: true
   assets:               
     - .env
     - assets/data/exercises.json
+    - assets/beep.mp3       
+    - assets/beep_long.mp3  
