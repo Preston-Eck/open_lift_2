@@ -20,19 +20,32 @@ class DatabaseService extends ChangeNotifier {
 
     return await openDatabase(
       path,
-      version: 4, // Bumped to version 4
+      version: 5, // BUMPED TO 5
       onCreate: (db, version) async {
         await _createTables(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
+        // Migration logic
         if (oldVersion < 2) {
            await db.execute('CREATE TABLE workout_plans (id TEXT PRIMARY KEY, name TEXT, goal TEXT, schedule_json TEXT)');
         }
         if (oldVersion < 3) {
+          // Old table, we will replace its function with the history table below
           await db.execute('CREATE TABLE exercise_stats (exercise_name TEXT PRIMARY KEY, one_rep_max REAL, last_updated TEXT)');
         }
         if (oldVersion < 4) {
           await db.execute('CREATE TABLE body_metrics (id TEXT PRIMARY KEY, date TEXT, weight REAL, measurements_json TEXT)');
+        }
+        if (oldVersion < 5) {
+          // NEW: History Table
+          await db.execute('''
+            CREATE TABLE one_rep_max_history (
+              id TEXT PRIMARY KEY,
+              exercise_name TEXT,
+              weight REAL,
+              date TEXT
+            )
+          ''');
         }
       }
     );
@@ -42,18 +55,60 @@ class DatabaseService extends ChangeNotifier {
     await db.execute('CREATE TABLE user_equipment (id TEXT PRIMARY KEY, name TEXT, is_owned INTEGER)');
     await db.execute('CREATE TABLE workout_logs (id TEXT PRIMARY KEY, exercise_id TEXT, exercise_name TEXT, weight REAL, reps INTEGER, volume_load REAL, timestamp TEXT)');
     await db.execute('CREATE TABLE workout_plans (id TEXT PRIMARY KEY, name TEXT, goal TEXT, schedule_json TEXT)');
+    // We keep exercise_stats for legacy, but primarily use history now
     await db.execute('CREATE TABLE exercise_stats (exercise_name TEXT PRIMARY KEY, one_rep_max REAL, last_updated TEXT)');
     await db.execute('CREATE TABLE body_metrics (id TEXT PRIMARY KEY, date TEXT, weight REAL, measurements_json TEXT)');
+    // NEW
+    await db.execute('CREATE TABLE one_rep_max_history (id TEXT PRIMARY KEY, exercise_name TEXT, weight REAL, date TEXT)');
   }
 
-  // --- Equipment Methods ---
-  Future<void> updateEquipment(String name, bool isOwned) async {
+  // --- STRENGTH HISTORY METHODS (NEW) ---
+
+  // Add a new record (Snapshot of strength at this time)
+  Future<void> addOneRepMax(String exercise, double weight) async {
     final db = await database;
     await db.insert(
-      'user_equipment',
-      {'id': name, 'name': name, 'is_owned': isOwned ? 1 : 0},
+      'one_rep_max_history',
+      {
+        'id': DateTime.now().toIso8601String(),
+        'exercise_name': exercise,
+        'weight': weight,
+        'date': DateTime.now().toIso8601String()
+      },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
+    notifyListeners();
+  }
+
+  // Get the most recent max for every exercise
+  Future<Map<String, double>> getLatestOneRepMaxes() async {
+    final db = await database;
+    // Order by date ascending so we can iterate and overwrite with the latest
+    final res = await db.query('one_rep_max_history', orderBy: 'date ASC');
+    
+    final Map<String, double> latest = {};
+    for (var row in res) {
+      latest[row['exercise_name'] as String] = row['weight'] as double;
+    }
+    return latest;
+  }
+
+  // Get full history for a specific exercise (for charting)
+  Future<List<Map<String, dynamic>>> getOneRepMaxHistory(String exerciseName) async {
+    final db = await database;
+    return await db.query(
+      'one_rep_max_history',
+      where: 'exercise_name = ?',
+      whereArgs: [exerciseName],
+      orderBy: 'date DESC' // Newest first
+    );
+  }
+
+  // --- EXISTING METHODS (UNCHANGED) ---
+  
+  Future<void> updateEquipment(String name, bool isOwned) async {
+    final db = await database;
+    await db.insert('user_equipment', {'id': name, 'name': name, 'is_owned': isOwned ? 1 : 0}, conflictAlgorithm: ConflictAlgorithm.replace);
     notifyListeners();
   }
 
@@ -63,7 +118,6 @@ class DatabaseService extends ChangeNotifier {
     return res.map((e) => e['name'] as String).toList();
   }
 
-  // --- Logging Methods ---
   Future<void> logSet(LogEntry entry) async {
     final db = await database;
     await db.insert('workout_logs', entry.toMap());
@@ -76,14 +130,9 @@ class DatabaseService extends ChangeNotifier {
     return res.map((e) => LogEntry.fromMap(e)).toList();
   }
 
-  // --- Plan Methods ---
   Future<void> savePlan(WorkoutPlan plan) async {
     final db = await database;
-    await db.insert(
-      'workout_plans', 
-      plan.toMap(),
-      conflictAlgorithm: ConflictAlgorithm.replace
-    );
+    await db.insert('workout_plans', plan.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
     notifyListeners();
   }
 
@@ -99,37 +148,19 @@ class DatabaseService extends ChangeNotifier {
     notifyListeners();
   }
 
-  // --- Stats / 1RM Methods ---
+  // Deprecated simple update, keeping for compatibility but forwarding to new method recommended
   Future<void> updateOneRepMax(String exercise, double weight) async {
-    final db = await database;
-    await db.insert(
-      'exercise_stats',
-      {
-        'exercise_name': exercise,
-        'one_rep_max': weight,
-        'last_updated': DateTime.now().toIso8601String()
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
-    notifyListeners();
+    await addOneRepMax(exercise, weight);
   }
 
+  // Deprecated getter
   Future<Map<String, double>> getAllOneRepMaxes() async {
-    final db = await database;
-    final res = await db.query('exercise_stats');
-    return {
-      for (var e in res) e['exercise_name'] as String: e['one_rep_max'] as double
-    };
+    return getLatestOneRepMaxes();
   }
 
-  // --- Body Metrics Methods ---
   Future<void> logBodyMetric(BodyMetric metric) async {
     final db = await database;
-    await db.insert(
-      'body_metrics',
-      metric.toMap(),
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('body_metrics', metric.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
     notifyListeners();
   }
 

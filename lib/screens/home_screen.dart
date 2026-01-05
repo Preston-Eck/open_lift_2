@@ -7,6 +7,7 @@ import 'plan_generator_screen.dart';
 import 'saved_plans_screen.dart';
 import 'manual_plan_creator_screen.dart';
 import 'body_metrics_screen.dart';
+import 'strength_profile_screen.dart'; // NEW IMPORT
 import 'settings_screen.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -21,7 +22,6 @@ class HomeScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text("Dashboard"),
         actions: [
-          // NEW: Settings Button
           IconButton(
             icon: const Icon(Icons.settings),
             onPressed: () {
@@ -88,16 +88,30 @@ class HomeScreen extends StatelessWidget {
               },
             ),
             const SizedBox(height: 10),
-            // FIX: Added Body Metrics Button
-            ElevatedButton.icon(
-              icon: const Icon(Icons.monitor_weight),
-              label: const Text("Body Metrics & Stats"),
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size(double.infinity, 50),
-              ),
-              onPressed: () {
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const BodyMetricsScreen()));
-              },
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.monitor_weight),
+                    label: const Text("Body Stats"),
+                    style: ElevatedButton.styleFrom(minimumSize: const Size(0, 50)),
+                    onPressed: () {
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const BodyMetricsScreen()));
+                    },
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.fitness_center),
+                    label: const Text("Strength Profile"),
+                    style: ElevatedButton.styleFrom(minimumSize: const Size(0, 50)),
+                    onPressed: () {
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const StrengthProfileScreen()));
+                    },
+                  ),
+                ),
+              ],
             ),
           ],
         ),

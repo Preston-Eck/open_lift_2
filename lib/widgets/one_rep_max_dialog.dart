@@ -42,7 +42,8 @@ class _EditOneRepMaxDialogState extends State<EditOneRepMaxDialog> {
           onPressed: () {
             final val = double.tryParse(_controller.text);
             if (val != null) {
-              context.read<DatabaseService>().updateOneRepMax(widget.exerciseName, val);
+              // FIX: Use addOneRepMax to create a history entry instead of overwriting
+              context.read<DatabaseService>().addOneRepMax(widget.exerciseName, val);
               Navigator.pop(context);
             }
           },
