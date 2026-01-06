@@ -6,7 +6,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 // Screens
-import 'screens/analytics_screen.dart'; 
+import 'screens/home_screen.dart'; // CHANGED: Import HomeScreen
 
 // Services
 import 'services/auth_service.dart';
@@ -64,7 +64,7 @@ class OpenLiftApp extends StatelessWidget {
     return MaterialApp(
       title: 'OpenLift',
       theme: AppTheme.lightTheme, 
-      home: const AnalyticsScreen(), 
+      home: const HomeScreen(), // CHANGED: Reverted to HomeScreen
       debugShowCheckedModeBanner: false,
     );
   }

@@ -8,6 +8,7 @@
 .buildlog/
 .history
 .svn/
+scripts/upload_exercises.py
 
 # IntelliJ
 .idea/
