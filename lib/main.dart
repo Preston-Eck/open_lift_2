@@ -6,9 +6,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 // Screens
-import 'screens/home_screen.dart'; 
-import 'screens/style_guide_screen.dart'; 
-import 'screens/analytics_screen.dart'; // <--- NEW IMPORT
+import 'screens/analytics_screen.dart'; 
 
 // Services
 import 'services/auth_service.dart';
@@ -66,12 +64,7 @@ class OpenLiftApp extends StatelessWidget {
     return MaterialApp(
       title: 'OpenLift',
       theme: AppTheme.lightTheme, 
-      
-      // --- PHASE 4 VERIFICATION ---
-      // Temporarily set to AnalyticsScreen to verify the Heatmap logic.
-      // Once verified, we will swap this back to HomeScreen() and add a navigation button.
       home: const AnalyticsScreen(), 
-      
       debugShowCheckedModeBanner: false,
     );
   }

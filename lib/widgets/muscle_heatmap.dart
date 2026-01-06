@@ -34,7 +34,7 @@ class MuscleHeatmap extends StatelessWidget {
               painter: BodyPainter(
                 isFront: isFront,
                 intensities: muscleIntensities,
-                baseColor: AppTheme.foundationalSlate.withValues(alpha: 0.1),
+                baseColor: AppTheme.foundationalSlate.withValues(alpha: 0.05),
                 highlightColor: AppTheme.motivationCoral,
               ),
             ),
@@ -45,7 +45,6 @@ class MuscleHeatmap extends StatelessWidget {
   }
 }
 
-// 🎨 The Painter: Logic to color specific body parts
 class BodyPainter extends CustomPainter {
   final bool isFront;
   final Map<String, double> intensities;
@@ -63,84 +62,94 @@ class BodyPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final Paint paint = Paint()..style = PaintingStyle.fill;
     
-    // SCALING: Fit the paths to the container size (Standard viewbox 0..100)
+    // Scale canvas to a standard 100x200 grid for easier path definition
     canvas.scale(size.width / 100, size.height / 200);
 
-    // --- HELPER: Draw Muscle ---
-    void drawMuscle(String id, Path path) {
-      final intensity = intensities[id.toLowerCase()] ?? 0.0;
+    void drawPart(String id, Path path) {
+      // Check for intensity (support plural/singular naming if needed)
+      final intensity = intensities[id] ?? 0.0;
       
-      // Color Logic: White -> Red based on intensity
       if (intensity > 0) {
         paint.color = Color.lerp(Colors.white, highlightColor, intensity)!;
       } else {
-        paint.color = baseColor; // Empty/Unused state
+        paint.color = baseColor;
       }
       
       canvas.drawPath(path, paint);
       
-      // Outline
+      // Draw outline
       final borderPaint = Paint()
         ..style = PaintingStyle.stroke
         ..color = Colors.black12
-        ..strokeWidth = 1.0;
+        ..strokeWidth = 0.5;
       canvas.drawPath(path, borderPaint);
     }
 
     if (isFront) {
-      _drawFront(drawMuscle);
+      _drawFront(drawPart);
     } else {
-      _drawBack(drawMuscle);
+      _drawBack(drawPart);
     }
   }
 
-  // --- PATH DEFINITIONS (Simplified for Prototype) ---
-  // In a full app, these would be precise SVG paths imported from assets
   void _drawFront(Function(String, Path) draw) {
-    // Chest
-    final chest = Path()..addRect(const Rect.fromLTWH(35, 40, 30, 25));
-    draw('chest', chest);
+    // --- CHEST (Pectorals) ---
+    final chest = Path()..addRect(const Rect.fromLTWH(35, 40, 30, 20));
     draw('pectorals', chest);
+    draw('chest', chest);
 
-    // Abs
-    final abs = Path()..addRect(const Rect.fromLTWH(40, 65, 20, 30));
-    draw('abs', abs);
+    // --- ABS (Abdominals) ---
+    final abs = Path()..addRect(const Rect.fromLTWH(40, 62, 20, 25));
     draw('abdominals', abs);
+    draw('abs', abs);
 
-    // Quads
-    final quads = Path()..addRect(const Rect.fromLTWH(30, 100, 40, 40));
-    draw('quads', quads);
-    draw('quadriceps', quads);
-    
-    // Biceps (Left/Right)
-    final biceps = Path()..addRect(const Rect.fromLTWH(20, 40, 15, 25))..addRect(const Rect.fromLTWH(65, 40, 15, 25));
-    draw('biceps', biceps);
-    
-    // Shoulders
-    final shoulders = Path()..addOval(const Rect.fromLTWH(20, 35, 60, 15));
+    // --- SHOULDERS (Deltoids) ---
+    final shoulders = Path()
+      ..addOval(const Rect.fromLTWH(20, 38, 15, 15)) // Left
+      ..addOval(const Rect.fromLTWH(65, 38, 15, 15)); // Right
     draw('shoulders', shoulders);
     draw('deltoids', shoulders);
+
+    // --- BICEPS ---
+    final biceps = Path()
+      ..addRect(const Rect.fromLTWH(20, 55, 12, 15)) // Left
+      ..addRect(const Rect.fromLTWH(68, 55, 12, 15)); // Right
+    draw('biceps', biceps);
+
+    // --- QUADS (Quadriceps) ---
+    final quads = Path()..addRect(const Rect.fromLTWH(30, 90, 40, 40));
+    draw('quadriceps', quads);
+    draw('quads', quads);
   }
 
   void _drawBack(Function(String, Path) draw) {
-    // Back (Lats)
-    final lats = Path()..addRect(const Rect.fromLTWH(35, 40, 30, 40));
-    draw('lats', lats);
-    draw('back', lats);
+    // --- BACK (Lats/Traps) ---
+    final back = Path()..addRect(const Rect.fromLTWH(32, 40, 36, 35));
+    draw('back', back);
+    draw('lats', back);
+    draw('trapezius', back);
 
-    // Glutes
-    final glutes = Path()..addRect(const Rect.fromLTWH(35, 80, 30, 20));
+    // --- TRICEPS ---
+    final triceps = Path()
+      ..addRect(const Rect.fromLTWH(20, 50, 10, 20)) // Left
+      ..addRect(const Rect.fromLTWH(70, 50, 10, 20)); // Right
+    draw('triceps', triceps);
+
+    // --- GLUTES ---
+    final glutes = Path()..addRect(const Rect.fromLTWH(32, 78, 36, 20));
     draw('glutes', glutes);
 
-    // Hamstrings
-    final hams = Path()..addRect(const Rect.fromLTWH(35, 100, 30, 40));
+    // --- HAMSTRINGS ---
+    final hams = Path()..addRect(const Rect.fromLTWH(32, 100, 36, 35));
     draw('hamstrings', hams);
     
-    // Triceps
-     final triceps = Path()..addRect(const Rect.fromLTWH(25, 45, 10, 20))..addRect(const Rect.fromLTWH(65, 45, 10, 20));
-    draw('triceps', triceps);
+    // --- CALVES ---
+    final calves = Path()..addRect(const Rect.fromLTWH(35, 140, 30, 25));
+    draw('calves', calves);
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+  bool shouldRepaint(covariant BodyPainter oldDelegate) {
+    return oldDelegate.intensities != intensities;
+  }
 }
