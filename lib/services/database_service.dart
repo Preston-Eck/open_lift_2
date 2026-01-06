@@ -246,4 +246,42 @@ class DatabaseService extends ChangeNotifier {
     final res = await db.query('body_metrics', orderBy: 'date DESC');
     return res.map((e) => BodyMetric.fromMap(e)).toList();
   }
+
+  // --- ANALYTICS EXPANSION ---
+  
+  // Fetch all logs within a date range to calculate heatmap data
+  Future<List<LogEntry>> getLogsInDateRange(DateTime start, DateTime end) async {
+    final db = await database;
+    final startStr = start.toIso8601String();
+    final endStr = end.toIso8601String();
+    
+    final res = await db.query(
+      'workout_logs',
+      where: 'timestamp >= ? AND timestamp <= ?',
+      whereArgs: [startStr, endStr],
+    );
+    
+    return res.map((e) => LogEntry.fromMap(e)).toList();
+  }
+
+  // Get total volume for the last X days for the Volume Chart
+  Future<Map<String, double>> getVolumePerDay(int days) async {
+    final db = await database;
+    final start = DateTime.now().subtract(Duration(days: days));
+    final startStr = start.toIso8601String();
+
+    final res = await db.rawQuery('''
+      SELECT substr(timestamp, 1, 10) as date, SUM(volume_load) as total_vol
+      FROM workout_logs
+      WHERE timestamp >= ?
+      GROUP BY substr(timestamp, 1, 10)
+      ORDER BY date ASC
+    ''', [startStr]);
+
+    final Map<String, double> data = {};
+    for (var row in res) {
+      data[row['date'] as String] = (row['total_vol'] as num).toDouble();
+    }
+    return data;
+  }
 }

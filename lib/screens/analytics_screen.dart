@@ -1,8 +1,11 @@
-import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:intl/intl.dart';
+import 'package:fl_chart/fl_chart.dart';
 import '../services/database_service.dart';
+import '../services/analytics_service.dart';
+import '../theme.dart';
+import '../models/exercise.dart';
+import '../widgets/muscle_heatmap.dart';
 
 class AnalyticsScreen extends StatefulWidget {
   const AnalyticsScreen({super.key});
@@ -12,200 +15,150 @@ class AnalyticsScreen extends StatefulWidget {
 }
 
 class _AnalyticsScreenState extends State<AnalyticsScreen> {
-  // We use a future to fetch all data at once
-  late Future<Map<String, dynamic>> _analyticsFuture;
+  // State
+  bool _isLoading = true;
+  Map<String, double> _heatmapData = {};
+  List<Map<String, dynamic>> _weeklyVolume = [];
+  
+  late AnalyticsService _analyticsService;
 
   @override
   void initState() {
     super.initState();
-    _analyticsFuture = _loadAnalytics();
+    _loadData();
   }
 
-  Future<Map<String, dynamic>> _loadAnalytics() async {
-    final db = Provider.of<DatabaseService>(context, listen: false);
-    return {
-      'volume': await db.getWeeklyVolume(),
-      'consistency': await db.getWeeklyConsistency(),
-      'exercises': await db.getMostFrequentExercises(),
-    };
+  Future<void> _loadData() async {
+    final dbService = Provider.of<DatabaseService>(context, listen: false);
+    _analyticsService = AnalyticsService(dbService);
+
+    // 1. Fetch Volume
+    final vol = await dbService.getWeeklyVolume();
+    
+    // 2. Fetch Heatmap
+    // We need to fetch all exercises first to map Names -> Muscles
+    // For this prototype, we'll fetch customs. 
+    // Ideally, this list should merge 'standard' exercises too.
+    List<Exercise> allExercises = await dbService.getCustomExercises(); 
+    // NOTE: In production, merge this with your JSON assets list!
+    
+    final heatMap = await _analyticsService.generateMuscleHeatmapData(allExercises);
+
+    if (mounted) {
+      setState(() {
+        _weeklyVolume = vol;
+        _heatmapData = heatMap;
+        _isLoading = false;
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text("Progress Monitor")),
-      body: FutureBuilder<Map<String, dynamic>>(
-        future: _analyticsFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (!snapshot.hasData || snapshot.hasError) {
-            return const Center(child: Text("No data available yet. Go lift!"));
-          }
-
-          final volumeData = snapshot.data!['volume'] as List<Map<String, dynamic>>;
-          final consistencyData = snapshot.data!['consistency'] as List<Map<String, dynamic>>;
-
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildSectionHeader("Volume Load", "Total lbs moved per week"),
-                const SizedBox(height: 20),
-                _buildVolumeChart(volumeData),
-                const SizedBox(height: 40),
-                
-                _buildSectionHeader("Consistency", "Workouts per week (Target: 3+)"),
-                const SizedBox(height: 20),
-                _buildConsistencyChart(consistencyData),
-                
-                const SizedBox(height: 40),
-                _buildExerciseList(snapshot.data!['exercises']),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildSectionHeader(String title, String subtitle) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(title, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-        Text(subtitle, style: TextStyle(color: Colors.grey[600], fontSize: 14)),
-      ],
-    );
-  }
-
-  Widget _buildVolumeChart(List<Map<String, dynamic>> data) {
-    if (data.isEmpty) return const SizedBox(height: 200, child: Center(child: Text("No volume data.")));
-
-    List<FlSpot> spots = [];
-    List<String> dates = [];
-
-    for (int i = 0; i < data.length; i++) {
-      spots.add(FlSpot(i.toDouble(), (data[i]['total_volume'] as num).toDouble()));
-      dates.add(data[i]['week_start'] as String);
+    if (_isLoading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    return SizedBox(
-      height: 250,
-      child: LineChart(
-        LineChartData(
-          gridData: const FlGridData(show: true, drawVerticalLine: false),
-          titlesData: FlTitlesData(
-            bottomTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: true,
-                getTitlesWidget: (value, meta) {
-                  int index = value.toInt();
-                  if (index >= 0 && index < dates.length) {
-                    // Show every other label to avoid clutter
-                    if (index % 2 == 0) {
-                      final date = DateTime.parse(dates[index]);
-                      return Padding(
-                        padding: const EdgeInsets.only(top: 8.0),
-                        child: Text(DateFormat('MM/dd').format(date), style: const TextStyle(fontSize: 10)),
-                      );
-                    }
-                  }
-                  return const SizedBox();
-                },
-                interval: 1,
+    return Scaffold(
+      appBar: AppBar(title: const Text("Training Analytics")),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 1. Volume Chart
+            Text("Weekly Volume (lbs)", style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 16),
+            Container(
+              height: 200,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppTheme.foundationalSlate.withValues(alpha: 0.1)),
               ),
+              child: _buildVolumeChart(),
             ),
-            leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-          ),
-          borderData: FlBorderData(show: false),
-          lineBarsData: [
-            LineChartBarData(
-              spots: spots,
-              isCurved: true,
-              color: Colors.blueAccent,
-              barWidth: 3,
-              isStrokeCapRound: true,
-              dotData: const FlDotData(show: true),
-              belowBarData: BarAreaData(
-                show: true, 
-                color: Colors.blueAccent.withValues(alpha: 0.15)
-              ),
+
+            const SizedBox(height: 32),
+
+            // 2. Muscle Heatmap
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text("Muscle Heatmap", style: Theme.of(context).textTheme.titleLarge),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppTheme.clarityCream,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppTheme.foundationalSlate.withValues(alpha: 0.1)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Text("Less ", style: TextStyle(fontSize: 10)),
+                      Icon(Icons.circle, size: 8, color: AppTheme.foundationalSlate.withValues(alpha: 0.1)),
+                      const SizedBox(width: 4),
+                      const Icon(Icons.circle, size: 8, color: AppTheme.motivationCoral),
+                      const Text(" More", style: TextStyle(fontSize: 10)),
+                    ],
+                  ),
+                )
+              ],
             ),
+            const SizedBox(height: 8),
+            const Text("Based on exercise frequency over the last 90 days."),
+            const SizedBox(height: 16),
+            
+            // The Heatmap Widget
+            MuscleHeatmap(muscleIntensities: _heatmapData),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildConsistencyChart(List<Map<String, dynamic>> data) {
-    if (data.isEmpty) return const SizedBox(height: 200, child: Center(child: Text("No consistency data.")));
+  Widget _buildVolumeChart() {
+    if (_weeklyVolume.isEmpty) {
+      return const Center(child: Text("No volume data yet. Go lift heavy!"));
+    }
 
-    return SizedBox(
-      height: 200,
-      child: BarChart(
-        BarChartData(
-          gridData: const FlGridData(show: false),
-          titlesData: FlTitlesData(
-            bottomTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: true,
-                getTitlesWidget: (value, meta) {
-                  int index = value.toInt();
-                   if (index >= 0 && index < data.length) {
-                    final date = DateTime.parse(data[index]['week_start']);
-                    return Padding(
-                      padding: const EdgeInsets.only(top: 8.0),
-                      child: Text(DateFormat('MM/dd').format(date), style: const TextStyle(fontSize: 10)),
-                    );
-                   }
-                   return const SizedBox();
-                },
-              ),
+    return BarChart(
+      BarChartData(
+        alignment: BarChartAlignment.spaceAround,
+        maxY: _weeklyVolume.map((e) => e['total_volume'] as double).reduce((a, b) => a > b ? a : b) * 1.2,
+        barTouchData: BarTouchData(enabled: false),
+        titlesData: FlTitlesData(
+          show: true,
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              getTitlesWidget: (value, meta) {
+                // Simplified Date logic for prototype
+                return Text("W${value.toInt()}", style: const TextStyle(fontSize: 10));
+              },
             ),
-            leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
           ),
-          borderData: FlBorderData(show: false),
-          barGroups: data.asMap().entries.map((entry) {
-            final count = (entry.value['days_active'] as num).toDouble();
-            return BarChartGroupData(
-              x: entry.key,
-              barRods: [
-                BarChartRodData(
-                  toY: count,
-                  color: count >= 3 ? Colors.green : Colors.orange, // Fitness Logic: Green if meeting target
-                  width: 16,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-              ],
-            );
-          }).toList(),
+          leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
         ),
+        gridData: const FlGridData(show: false),
+        borderData: FlBorderData(show: false),
+        barGroups: _weeklyVolume.asMap().entries.map((e) {
+          return BarChartGroupData(
+            x: e.key,
+            barRods: [
+              BarChartRodData(
+                toY: e.value['total_volume'] as double,
+                color: AppTheme.renewalTeal,
+                width: 16,
+                borderRadius: BorderRadius.circular(4),
+              )
+            ],
+          );
+        }).toList(),
       ),
-    );
-  }
-
-  Widget _buildExerciseList(List<Map<String, dynamic>> exercises) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text("Most Frequent Exercises", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 10),
-        if (exercises.isEmpty) const Text("No exercises logged yet."),
-        ...exercises.map((e) => Card(
-          child: ListTile(
-            leading: const Icon(Icons.fitness_center),
-            title: Text(e['exercise_name']),
-            trailing: Text("${e['count']} sessions"),
-          ),
-        )),
-      ],
     );
   }
 }
