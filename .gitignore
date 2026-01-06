@@ -52,4 +52,4 @@ web/icons/Icon-512.png
 # Application Specific
 **/exercises/
 scripts/
-.env 
+.env
