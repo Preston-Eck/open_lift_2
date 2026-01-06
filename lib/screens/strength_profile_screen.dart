@@ -55,8 +55,12 @@ class _StrengthProfileScreenState extends State<StrengthProfileScreen> {
               final w = double.tryParse(weightCtrl.text);
               if (nameCtrl.text.isNotEmpty && w != null) {
                 await context.read<DatabaseService>().addOneRepMax(nameCtrl.text, w);
-                if (mounted) Navigator.pop(ctx);
-                _loadData(); // Refresh list
+                
+                // FIXED: Check mounted before using context across async gaps
+                if (ctx.mounted) {
+                  Navigator.pop(ctx);
+                  _loadData(); // Refresh list
+                }
               }
             },
             child: const Text("Save"),

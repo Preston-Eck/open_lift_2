@@ -81,7 +81,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 10),
 
           DropdownButtonFormField<String>(
-            value: _gender,
+            initialValue: _gender,
             decoration: const InputDecoration(labelText: "Gender", border: OutlineInputBorder()),
             items: ['Male', 'Female', 'Other'].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
             onChanged: (val) => setState(() => _gender = val!),
@@ -89,7 +89,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 10),
 
           DropdownButtonFormField<String>(
-            value: _fitnessLevel,
+            initialValue: _fitnessLevel,
             decoration: const InputDecoration(labelText: "Fitness Level", border: OutlineInputBorder()),
             items: ['Beginner', 'Intermediate', 'Advanced', 'Elite'].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
             onChanged: (val) => setState(() => _fitnessLevel = val!),

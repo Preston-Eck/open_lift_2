@@ -4,13 +4,12 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart'; // Needed for Desktop Database support
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'screens/home_screen.dart';
+import 'screens/home_screen.dart'; // Kept based on usage in home: const HomeScreen()
 import 'services/auth_service.dart';
 import 'services/database_service.dart';
 import 'services/gemini_service.dart';
 import 'services/workout_player_service.dart';
 import 'theme.dart';
-
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

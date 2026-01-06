@@ -55,9 +55,8 @@ class _AddExerciseScreenState extends State<AddExerciseScreen> {
               decoration: const InputDecoration(labelText: "Target Muscles (comma separated)"),
             ),
              const SizedBox(height: 10),
-            // FIXED: Replaced 'value' with 'initialValue' if deprecated, or ensured 'value' usage is correct for Dropdown
             DropdownButtonFormField<String>(
-              value: _category, 
+              initialValue: _category, 
               items: ["Strength", "Cardio", "Stretching"].map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
               onChanged: (v) => setState(() => _category = v!),
               decoration: const InputDecoration(labelText: "Category"),

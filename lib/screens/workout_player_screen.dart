@@ -4,13 +4,10 @@ import 'package:provider/provider.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
-import '../services/workout_player_service.dart';
 import '../services/database_service.dart';
 import '../models/log.dart';
 import '../models/plan.dart';
 import '../models/exercise.dart';
-import '../widgets/one_rep_max_dialog.dart';
-import 'exercise_detail_screen.dart';
 
 class WorkoutPlayerScreen extends StatefulWidget {
   final WorkoutDay? workoutDay;
@@ -277,17 +274,17 @@ class _ExerciseCard extends StatelessWidget {
             subtitle: Text("Rest: ${exercise.restSeconds}s"),
             trailing: Text(exercise.intensity ?? ""),
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16.0),
             child: Row(
               children: [
-                const Expanded(flex: 2, child: Text("WEIGHT", style: TextStyle(color: Colors.grey, fontSize: 10))),
-                const SizedBox(width: 8),
-                const Expanded(flex: 2, child: Text("REPS", style: TextStyle(color: Colors.grey, fontSize: 10))),
-                const SizedBox(width: 8),
+                Expanded(flex: 2, child: Text("WEIGHT", style: TextStyle(color: Colors.grey, fontSize: 10))),
+                SizedBox(width: 8),
+                Expanded(flex: 2, child: Text("REPS", style: TextStyle(color: Colors.grey, fontSize: 10))),
+                SizedBox(width: 8),
                 // THIRD COLUMN HEADER
-                const Expanded(flex: 2, child: Text("TIME", style: TextStyle(color: Colors.grey, fontSize: 10))),
-                const SizedBox(width: 40), // Space for checkbox
+                Expanded(flex: 2, child: Text("TIME", style: TextStyle(color: Colors.grey, fontSize: 10))),
+                SizedBox(width: 40), // Space for checkbox
               ],
             ),
           ),
