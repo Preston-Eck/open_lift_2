@@ -13,6 +13,7 @@ class PlanGeneratorScreen extends StatefulWidget {
 }
 
 class _PlanGeneratorScreenState extends State<PlanGeneratorScreen> {
+  final TextEditingController _timeController = TextEditingController(text: "60");
   final TextEditingController _goalController = TextEditingController();
   String _daysPerWeek = "3";
   bool _isLoading = false;
@@ -55,11 +56,12 @@ class _PlanGeneratorScreenState extends State<PlanGeneratorScreen> {
 
       // 5. Call AI with all the gathered context
       final plan = await gemini.generateFullPlan(
-        _goalController.text.isEmpty ? "General Fitness" : _goalController.text,
+        _goalController.text,
         _daysPerWeek,
+        int.tryParse(_timeController.text) ?? 60, // Pass time
         equipment,
         userProfile,
-        strengthStats, // <--- Passing the new data here
+        strengthStats, 
       );
       
       // 6. Update UI with the result
@@ -122,6 +124,14 @@ class _PlanGeneratorScreenState extends State<PlanGeneratorScreen> {
             ),
             const SizedBox(height: 20),
             
+            const Text("Time Available (minutes)", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            TextField(
+              controller: _timeController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(border: OutlineInputBorder(), hintText: "60"),
+            ),
+            const SizedBox(height: 20),
+
             SizedBox(
               width: double.infinity,
               height: 50,

@@ -4,12 +4,14 @@ class WorkoutPlan {
   final String id;
   final String name;
   final String goal;
+  final String type; // NEW: 'Strength' or 'HIIT'
   final List<WorkoutDay> days;
 
   WorkoutPlan({
     required this.id,
     required this.name,
     required this.goal,
+    this.type = 'Strength', // Default
     required this.days,
   });
 
@@ -18,6 +20,7 @@ class WorkoutPlan {
       'id': id,
       'name': name,
       'goal': goal,
+      'type': type, // Save to DB
       'schedule_json': jsonEncode(days.map((x) => x.toMap()).toList()),
     };
   }
@@ -27,6 +30,7 @@ class WorkoutPlan {
       id: map['id'] ?? '',
       name: map['name'] ?? '',
       goal: map['goal'] ?? '',
+      type: map['type'] ?? 'Strength', // Load from DB
       days: map['schedule_json'] != null 
           ? List<WorkoutDay>.from(
               (jsonDecode(map['schedule_json']) as List).map((x) => WorkoutDay.fromMap(x)),
@@ -40,6 +44,7 @@ class WorkoutPlan {
       id: json['id'] ?? '',
       name: json['name'] ?? '',
       goal: json['goal'] ?? '',
+      type: json['type'] ?? 'Strength',
       days: List<WorkoutDay>.from(
         (json['days'] as List).map((x) => WorkoutDay.fromMap(x)),
       ),
@@ -74,7 +79,7 @@ class WorkoutExercise {
   final String reps;
   final int restSeconds;
   final String? intensity;
-  final int secondsPerSet; // New field for Timed Exercises
+  final int secondsPerSet;
 
   WorkoutExercise({
     required this.name,

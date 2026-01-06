@@ -2,19 +2,21 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:audioplayers/audioplayers.dart';
-import 'package:supabase_flutter/supabase_flutter.dart'; // Needed to query Wiki
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import '../services/workout_player_service.dart';
 import '../services/database_service.dart';
 import '../models/log.dart';
 import '../models/plan.dart';
-import '../models/exercise.dart'; // Needed for Wiki details
+import '../models/exercise.dart';
 import '../widgets/one_rep_max_dialog.dart';
-import 'exercise_detail_screen.dart'; // The screen to navigate to
+import 'exercise_detail_screen.dart';
 
 class WorkoutPlayerScreen extends StatefulWidget {
   final WorkoutDay? workoutDay;
+  final bool isHiit; // Pass true if the plan type is HIIT
 
-  const WorkoutPlayerScreen({super.key, this.workoutDay});
+  const WorkoutPlayerScreen({super.key, this.workoutDay, this.isHiit = false});
 
   @override
   State<WorkoutPlayerScreen> createState() => _WorkoutPlayerScreenState();
@@ -22,511 +24,367 @@ class WorkoutPlayerScreen extends StatefulWidget {
 
 class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
   Map<String, double> _oneRepMaxes = {};
+  
+  // --- HIIT STATE ---
+  int _currentExerciseIndex = 0;
+  int _currentSetIndex = 0;
+  bool _hiitActive = false;
+  int _hiitTimer = 0;
+  String _hiitStatus = "READY"; // READY, WORK, REST, FINISHED
+  Exercise? _currentWikiData; // For showing images during HIIT
 
   @override
   void initState() {
     super.initState();
     _refreshOneRepMaxes();
+    if (widget.isHiit) {
+      _loadWikiDataForIndex(0); // Preload first image
+    }
   }
 
-  /// Fetches latest 1RM data from local DB
   Future<void> _refreshOneRepMaxes() async {
     final db = context.read<DatabaseService>();
-    try {
-      final stats = await db.getLatestOneRepMaxes();
-      if (mounted) setState(() => _oneRepMaxes = stats);
-    } catch (e) {
-      debugPrint("Error fetching 1RMs: $e");
+    final stats = await db.getLatestOneRepMaxes();
+    if (mounted) setState(() => _oneRepMaxes = stats);
+  }
+
+  Future<void> _loadWikiDataForIndex(int index) async {
+    if (widget.workoutDay == null) return;
+    if (index >= widget.workoutDay!.exercises.length) return;
+    
+    final name = widget.workoutDay!.exercises[index].name;
+    final data = await Supabase.instance.client.from('exercises').select().ilike('name', name).limit(1).maybeSingle();
+    if (data != null && mounted) {
+      setState(() => _currentWikiData = Exercise.fromJson(data));
     }
   }
 
-  /// Navigates to the Wiki Detail screen for a specific exercise name.
-  /// Queries Supabase to find the full exercise data.
-  Future<void> _openWikiForExercise(String exerciseName) async {
-    try {
-      // Show small feedback that we are loading
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Loading exercise details..."), duration: Duration(seconds: 1)),
-      );
+  // --- HIIT LOGIC ---
+  void _startHiitSession() {
+    setState(() {
+      _hiitActive = true;
+      _hiitStatus = "GET READY";
+      _hiitTimer = 3; 
+    });
+    WakelockPlus.enable();
+    _runHiitTimer();
+  }
 
-      // Query Supabase: Select * from exercises where name ILIKE 'exerciseName'
-      // We use 'ilike' for case-insensitive matching
-      final data = await Supabase.instance.client
-          .from('exercises')
-          .select()
-          .ilike('name', exerciseName)
-          .limit(1)
-          .maybeSingle();
+  void _runHiitTimer() {
+    Timer.periodic(const Duration(seconds: 1), (timer) async {
+      if (!mounted || !_hiitActive) {
+        timer.cancel();
+        return;
+      }
 
-      if (data != null && mounted) {
-        // Convert JSON to Exercise object
-        final exercise = Exercise.fromJson(data);
-        
-        // Navigate to the detail screen
-        Navigator.push(
-          context, 
-          MaterialPageRoute(builder: (_) => ExerciseDetailScreen(exercise: exercise))
-        );
+      if (_hiitTimer > 0) {
+        setState(() => _hiitTimer--);
+        if (_hiitTimer > 0 && _hiitTimer <= 3) _playBeep();
       } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Could not find '$exerciseName' in the Wiki.")),
-          );
+        // Transition
+        _handleHiitTransition(timer);
+      }
+    });
+  }
+
+  void _handleHiitTransition(Timer timer) {
+    _playBeep(long: true);
+    final exercises = widget.workoutDay!.exercises;
+    
+    if (_hiitStatus == "GET READY" || _hiitStatus == "REST") {
+      // Start Work
+      setState(() {
+        _hiitStatus = "WORK";
+        _hiitTimer = exercises[_currentExerciseIndex].secondsPerSet > 0 
+            ? exercises[_currentExerciseIndex].secondsPerSet 
+            : 30; // Default fallback if not set
+      });
+    } else if (_hiitStatus == "WORK") {
+      // Start Rest or Next Set
+      // Log the set automatically
+      _logHiitSet();
+
+      if (_currentSetIndex < exercises[_currentExerciseIndex].sets - 1) {
+        _currentSetIndex++; // Next set same exercise
+        setState(() {
+          _hiitStatus = "REST";
+          _hiitTimer = exercises[_currentExerciseIndex].restSeconds;
+        });
+      } else {
+        // Exercise Complete
+        if (_currentExerciseIndex < exercises.length - 1) {
+          _currentExerciseIndex++;
+          _currentSetIndex = 0;
+          _loadWikiDataForIndex(_currentExerciseIndex); // Load next image
+          setState(() {
+            _hiitStatus = "REST";
+            _hiitTimer = exercises[_currentExerciseIndex - 1].restSeconds; // Rest after previous
+          });
+        } else {
+          // All Done
+          timer.cancel();
+          setState(() {
+            _hiitStatus = "FINISHED";
+            _hiitActive = false;
+          });
+          WakelockPlus.disable();
         }
       }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
-      }
     }
+  }
+
+  void _logHiitSet() {
+     // Simplified auto-log for HIIT
+     final ex = widget.workoutDay!.exercises[_currentExerciseIndex];
+     context.read<DatabaseService>().logSet(LogEntry(
+        id: DateTime.now().toIso8601String(),
+        exerciseId: ex.name,
+        exerciseName: ex.name,
+        weight: 0,
+        reps: 0,
+        volumeLoad: 0,
+        timestamp: DateTime.now().toIso8601String()
+     ));
+  }
+
+  Future<void> _playBeep({bool long = false}) async {
+    final player = AudioPlayer();
+    await player.play(AssetSource(long ? 'beep_long.mp3' : 'beep.mp3'));
   }
 
   @override
   Widget build(BuildContext context) {
-    final player = Provider.of<WorkoutPlayerService>(context);
-    
-    final exercises = widget.workoutDay?.exercises ?? [
-      WorkoutExercise(name: "Freestyle Workout", sets: 1, reps: "0", restSeconds: 60)
-    ];
+    if (widget.isHiit && _hiitActive) {
+      return _buildHiitOverlay();
+    }
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.workoutDay?.name ?? "Active Workout"),
-        leading: IconButton(
-          icon: const Icon(Icons.close),
-          onPressed: () => _confirmExit(context, player),
-        ),
-      ),
-      body: Column(
-        children: [
-          _buildTimerHeader(player),
-          
-          Expanded(
-            child: ListView.separated(
-              padding: const EdgeInsets.all(16),
-              itemCount: exercises.length,
-              separatorBuilder: (c, i) => const Divider(height: 40, thickness: 2),
-              itemBuilder: (context, index) {
-                final ex = exercises[index];
-                final oneRepMax = _oneRepMaxes[ex.name];
+      appBar: AppBar(title: Text(widget.workoutDay?.name ?? "Workout")),
+      body: widget.isHiit ? _buildHiitStartScreen() : _buildStandardList(),
+    );
+  }
 
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Pass the new wiki navigation function to the header
-                    _buildExerciseHeader(context, ex, oneRepMax),
-                    const SizedBox(height: 10),
-                    _buildSetHeaders(ex),
-                    ...List.generate(ex.sets, (setIndex) => 
-                      _ExerciseSetRow(
-                        exercise: ex, 
-                        setNumber: setIndex + 1,
-                        suggestedWeight: _calculateTargetWeight(ex.intensity, oneRepMax),
-                      )
-                    ),
-                  ],
-                );
-              },
-            ),
-          ),
-          
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: SizedBox(
-              width: double.infinity,
-              height: 50,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
-                  foregroundColor: Colors.white
-                ),
-                onPressed: () {
-                  player.finishWorkout();
-                  Navigator.pop(context);
-                },
-                child: const Text("FINISH WORKOUT", style: TextStyle(fontWeight: FontWeight.bold)),
-              ),
-            ),
-          ),
+  // --- UI BUILDERS ---
+
+  Widget _buildHiitStartScreen() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.timer, size: 80, color: Colors.orange),
+          const SizedBox(height: 20),
+          const Text("HIIT Session", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+          const Text("Audio cues & Auto-advance enabled"),
+          const SizedBox(height: 40),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 20)),
+            onPressed: _startHiitSession,
+            child: const Text("START WORKOUT", style: TextStyle(fontSize: 20)),
+          )
         ],
       ),
     );
   }
 
-  Widget _buildTimerHeader(WorkoutPlayerService player) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 20),
-      color: player.state == WorkoutState.resting 
-        ? Colors.red.withValues(alpha: 0.2) 
-        : Colors.transparent,
+  Widget _buildHiitOverlay() {
+    final ex = widget.workoutDay!.exercises[_currentExerciseIndex];
+    return Scaffold(
+      backgroundColor: _hiitStatus == "WORK" ? Colors.green[900] : Colors.grey[900],
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Header
+            Padding(
+              padding: const EdgeInsets.all(20.0),
+              child: Text(_hiitStatus, style: const TextStyle(fontSize: 40, fontWeight: FontWeight.bold, color: Colors.white)),
+            ),
+            // Timer
+            Text("$_hiitTimer", style: const TextStyle(fontSize: 120, fontWeight: FontWeight.bold, color: Colors.white)),
+            
+            const Divider(),
+            
+            // Exercise Info
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(ex.name, style: const TextStyle(fontSize: 30, color: Colors.white), textAlign: TextAlign.center),
+                  Text("Set ${_currentSetIndex + 1} / ${ex.sets}", style: const TextStyle(fontSize: 20, color: Colors.white70)),
+                  
+                  const SizedBox(height: 20),
+                  // Image
+                  if (_currentWikiData != null && _currentWikiData!.images.isNotEmpty)
+                     SizedBox(
+                       height: 200,
+                       child: Image.network(
+                         // Simple fix for full URL construction
+                         _currentWikiData!.images.first.startsWith('http') 
+                            ? _currentWikiData!.images.first 
+                            : "https://nlbxwoinogqmnkvyrsyi.supabase.co/storage/v1/object/public/exercises/${_currentWikiData!.images.first}",
+                         fit: BoxFit.cover,
+                         errorBuilder: (c,e,s) => const Icon(Icons.image_not_supported, size: 50, color: Colors.white),
+                       ),
+                     ),
+                ],
+              ),
+            ),
+            
+            // Controls
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.stop),
+                label: const Text("STOP SESSION"),
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                onPressed: () => setState(() => _hiitActive = false),
+              ),
+            )
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStandardList() {
+    final exercises = widget.workoutDay?.exercises ?? [];
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: exercises.length,
+      itemBuilder: (context, index) {
+        return _ExerciseCard(
+          exercise: exercises[index], 
+          oneRepMax: _oneRepMaxes[exercises[index].name]
+        );
+      },
+    );
+  }
+}
+
+class _ExerciseCard extends StatelessWidget {
+  final WorkoutExercise exercise;
+  final double? oneRepMax;
+
+  const _ExerciseCard({required this.exercise, this.oneRepMax});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
       child: Column(
         children: [
-          Text(
-            player.state == WorkoutState.resting ? "RESTING" : "ACTIVE",
-            style: TextStyle(
-              color: player.state == WorkoutState.resting ? Colors.redAccent : Colors.grey,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 2
-            ),
+          ListTile(
+            title: Text(exercise.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+            subtitle: Text("Rest: ${exercise.restSeconds}s"),
+            trailing: Text(exercise.intensity ?? ""),
           ),
-          Text(
-            player.state == WorkoutState.resting 
-              ? "${player.timerSeconds}" 
-              : _formatDuration(Duration(seconds: 0)), 
-            style: const TextStyle(fontSize: 50, fontWeight: FontWeight.bold),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildExerciseHeader(BuildContext context, WorkoutExercise ex, double? oneRepMax) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // EXERCISE NAME - CLICKABLE FOR WIKI
-              InkWell(
-                onTap: () => _openWikiForExercise(ex.name), // Trigger Wiki Lookup
-                child: Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        ex.name, 
-                        style: const TextStyle(
-                          fontSize: 22, 
-                          fontWeight: FontWeight.bold,
-                          decoration: TextDecoration.underline, // Visual cue it's clickable
-                          decorationStyle: TextDecorationStyle.dotted,
-                        )
-                      ),
-                    ),
-                    const SizedBox(width: 5),
-                    const Icon(Icons.info_outline, size: 16, color: Colors.grey),
-                  ],
-                ),
-              ),
-              
-              const SizedBox(height: 4),
-
-              // 1RM BUTTON
-              InkWell(
-                borderRadius: BorderRadius.circular(4),
-                onTap: () async {
-                  await showDialog(
-                    context: context, 
-                    builder: (_) => EditOneRepMaxDialog(
-                      exerciseName: ex.name,
-                      currentMax: oneRepMax,
-                    )
-                  );
-                  _refreshOneRepMaxes();
-                },
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4.0),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.edit, size: 14, color: Colors.blue[300]),
-                      const SizedBox(width: 4),
-                      Text(
-                        oneRepMax != null 
-                          ? "1RM: ${oneRepMax.toInt()} lbs" 
-                          : "Set 1RM",
-                        style: TextStyle(
-                          color: Colors.blue[300], 
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        
-        // SUGGESTION BUBBLE
-        if (ex.intensity != null)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.grey[900],
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.white10)
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: Row(
               children: [
-                Text(
-                  "Goal: ${ex.intensity}", 
-                  style: const TextStyle(fontSize: 10, color: Colors.grey)
-                ),
-                if (_calculateTargetWeight(ex.intensity, oneRepMax) != null)
-                  Text(
-                    "${_calculateTargetWeight(ex.intensity, oneRepMax)!.toInt()} lbs",
-                    style: const TextStyle(fontSize: 16, color: Colors.greenAccent, fontWeight: FontWeight.bold),
-                  ),
+                const Expanded(flex: 2, child: Text("WEIGHT", style: TextStyle(color: Colors.grey, fontSize: 10))),
+                const SizedBox(width: 8),
+                const Expanded(flex: 2, child: Text("REPS", style: TextStyle(color: Colors.grey, fontSize: 10))),
+                const SizedBox(width: 8),
+                // THIRD COLUMN HEADER
+                const Expanded(flex: 2, child: Text("TIME", style: TextStyle(color: Colors.grey, fontSize: 10))),
+                const SizedBox(width: 40), // Space for checkbox
               ],
             ),
           ),
-      ],
-    );
-  }
-
-  Widget _buildSetHeaders(WorkoutExercise ex) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
-      child: Row(
-        children: [
-          const SizedBox(width: 32), 
-          const SizedBox(width: 16),
-          const Expanded(child: Text("LBS", style: TextStyle(color: Colors.grey, fontSize: 10))),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Text(
-              ex.secondsPerSet > 0 ? "TIME (s)" : "REPS", 
-              style: const TextStyle(color: Colors.grey, fontSize: 10)
-            )
-          ),
+          const Divider(),
+          ...List.generate(exercise.sets, (i) => _SetRow(setNum: i + 1, exercise: exercise)),
+          const SizedBox(height: 10),
         ],
       ),
     );
   }
-
-  void _confirmExit(BuildContext context, WorkoutPlayerService player) {
-    showDialog(
-      context: context, 
-      builder: (c) => AlertDialog(
-        title: const Text("End Workout?"),
-        content: const Text("Progress will be saved in logs."),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(c), child: const Text("Cancel")),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(c);
-              player.finishWorkout();
-              Navigator.pop(context);
-            }, 
-            child: const Text("End")
-          )
-        ],
-      )
-    );
-  }
-
-  String _formatDuration(Duration d) {
-    String twoDigits(int n) => n.toString().padLeft(2, '0');
-    final minutes = twoDigits(d.inMinutes.remainder(60));
-    final seconds = twoDigits(d.inSeconds.remainder(60));
-    return "${d.inHours > 0 ? '${d.inHours}:' : ''}$minutes:$seconds";
-  }
-
-  double? _calculateTargetWeight(String? intensity, double? oneRepMax) {
-    if (intensity == null || oneRepMax == null) return null;
-    if (intensity.contains('%')) {
-      final pct = double.tryParse(intensity.replaceAll('%', '')) ?? 0;
-      if (pct > 0) {
-        final suggested = oneRepMax * (pct / 100);
-        return (suggested / 5).round() * 5.0;
-      }
-    }
-    return null;
-  }
 }
 
-// --- Individual Set Row (No changes to logic, just styling) ---
-class _ExerciseSetRow extends StatefulWidget {
+class _SetRow extends StatefulWidget {
+  final int setNum;
   final WorkoutExercise exercise;
-  final int setNumber;
-  final double? suggestedWeight;
-
-  const _ExerciseSetRow({
-    required this.exercise, 
-    required this.setNumber,
-    this.suggestedWeight,
-  });
+  const _SetRow({required this.setNum, required this.exercise});
 
   @override
-  State<_ExerciseSetRow> createState() => _ExerciseSetRowState();
+  State<_SetRow> createState() => _SetRowState();
 }
 
-class _ExerciseSetRowState extends State<_ExerciseSetRow> with AutomaticKeepAliveClientMixin {
-  bool _isCompleted = false;
-  late TextEditingController _weightController;
-  late TextEditingController _repsController;
-  Timer? _timer;
-  int _currentSeconds = 0;
-  bool _timerRunning = false;
-  final AudioPlayer _audio = AudioPlayer();
-
-  @override
-  bool get wantKeepAlive => true; 
+class _SetRowState extends State<_SetRow> {
+  bool _done = false;
+  final _weightCtrl = TextEditingController();
+  final _repsCtrl = TextEditingController();
+  final _timeCtrl = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _currentSeconds = widget.exercise.secondsPerSet;
-    _weightController = TextEditingController(
-      text: widget.suggestedWeight != null ? widget.suggestedWeight!.toInt().toString() : ''
-    );
-    _repsController = TextEditingController();
-    if (int.tryParse(widget.exercise.reps) != null) {
-      _repsController.text = widget.exercise.reps;
+    _repsCtrl.text = widget.exercise.reps;
+    if (widget.exercise.secondsPerSet > 0) {
+      _timeCtrl.text = widget.exercise.secondsPerSet.toString();
     }
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    _audio.dispose();
-    _weightController.dispose();
-    _repsController.dispose();
-    super.dispose();
-  }
-
-  void _startTimer() {
-    setState(() => _timerRunning = true);
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) async {
-      if (_currentSeconds > 0) {
-        setState(() => _currentSeconds--);
-        if (_currentSeconds <= 3 && _currentSeconds > 0) {
-          await _audio.play(AssetSource('beep.mp3'));
-        }
-      } else {
-        timer.cancel();
-        await _audio.play(AssetSource('beep_long.mp3'));
-        setState(() => _timerRunning = false);
-      }
-    });
   }
 
   @override
   Widget build(BuildContext context) {
-    super.build(context); 
-    bool isTimed = widget.exercise.secondsPerSet > 0;
-
     return Container(
-      color: _isCompleted ? Colors.green.withValues(alpha: 0.1) : null,
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      color: _done ? Colors.green.withValues(alpha: 0.1) : null,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Row(
         children: [
-          Container(
-            width: 30,
-            alignment: Alignment.center,
-            child: CircleAvatar(
-              radius: 12,
-              backgroundColor: _isCompleted ? Colors.green : Colors.grey[800],
-              child: Text(
-                "${widget.setNumber}",
-                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          
+          // Weight
           Expanded(
-            child: Container(
-              height: 40,
-              decoration: BoxDecoration(color: Colors.grey[900], borderRadius: BorderRadius.circular(8)),
-              child: TextField(
-                controller: _weightController,
-                textAlign: TextAlign.center,
-                keyboardType: TextInputType.number,
-                enabled: !_isCompleted,
-                style: const TextStyle(fontWeight: FontWeight.bold),
-                decoration: const InputDecoration(border: InputBorder.none, hintText: "-", contentPadding: EdgeInsets.only(bottom: 8)),
-              ),
+            flex: 2,
+            child: TextField(
+              controller: _weightCtrl,
+              decoration: const InputDecoration(isDense: true, border: OutlineInputBorder(), hintText: "lbs"),
+              keyboardType: TextInputType.number,
+              enabled: !_done,
             ),
           ),
-          const SizedBox(width: 10),
-          
+          const SizedBox(width: 8),
+          // Reps
           Expanded(
-            child: isTimed 
-              ? InkWell(
-                  onTap: _isCompleted ? null : (_timerRunning ? null : _startTimer),
-                  borderRadius: BorderRadius.circular(8),
-                  child: Container(
-                    height: 40,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: _timerRunning ? Colors.orange.withValues(alpha: 0.2) : Colors.grey[900],
-                      borderRadius: BorderRadius.circular(8),
-                      border: _timerRunning ? Border.all(color: Colors.orange) : null
-                    ),
-                    child: _timerRunning
-                      ? Text("$_currentSeconds", style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 18))
-                      : (_currentSeconds == 0 
-                          ? const Icon(Icons.check, color: Colors.green) 
-                          : Row(mainAxisAlignment: MainAxisAlignment.center, children: [const Icon(Icons.play_arrow, size: 16, color: Colors.white), const SizedBox(width: 4), Text("${widget.exercise.secondsPerSet}s")])),
-                  ),
-                )
-              : Container(
-                  height: 40,
-                  decoration: BoxDecoration(color: Colors.grey[900], borderRadius: BorderRadius.circular(8)),
-                  child: TextField(
-                    controller: _repsController,
-                    textAlign: TextAlign.center,
-                    keyboardType: TextInputType.number,
-                    enabled: !_isCompleted,
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                    decoration: const InputDecoration(border: InputBorder.none, hintText: "-", contentPadding: EdgeInsets.only(bottom: 8)),
-                  ),
-                ),
-          ),
-          const SizedBox(width: 10),
-
-          Transform.scale(
-            scale: 1.3,
-            child: Checkbox(
-              value: _isCompleted,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-              activeColor: Colors.green,
-              onChanged: (val) {
-                if (val == true) {
-                  _logSet(context);
-                } else {
-                  setState(() => _isCompleted = false);
-                }
-              },
+            flex: 2,
+            child: TextField(
+              controller: _repsCtrl,
+              decoration: const InputDecoration(isDense: true, border: OutlineInputBorder(), hintText: "reps"),
+              keyboardType: TextInputType.number,
+              enabled: !_done,
             ),
           ),
+          const SizedBox(width: 8),
+          // Time (3rd Column)
+          Expanded(
+            flex: 2,
+            child: TextField(
+              controller: _timeCtrl,
+              decoration: const InputDecoration(isDense: true, border: OutlineInputBorder(), hintText: "sec"),
+              keyboardType: TextInputType.number,
+              enabled: !_done,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Checkbox(
+            value: _done,
+            activeColor: Colors.green,
+            onChanged: (val) {
+              setState(() => _done = val!);
+              if (val!) {
+                // Save logic here
+                context.read<DatabaseService>().logSet(LogEntry(
+                  id: DateTime.now().toIso8601String(),
+                  exerciseId: widget.exercise.name,
+                  exerciseName: widget.exercise.name,
+                  weight: double.tryParse(_weightCtrl.text) ?? 0,
+                  reps: int.tryParse(_repsCtrl.text) ?? 0,
+                  volumeLoad: (double.tryParse(_weightCtrl.text) ?? 0) * (int.tryParse(_repsCtrl.text) ?? 0),
+                  timestamp: DateTime.now().toIso8601String()
+                ));
+              }
+            },
+          )
         ],
       ),
     );
-  }
-
-  void _logSet(BuildContext context) {
-    final weight = double.tryParse(_weightController.text) ?? 0.0;
-    
-    int resultValue;
-    if (widget.exercise.secondsPerSet > 0) {
-      resultValue = widget.exercise.secondsPerSet; 
-    } else {
-      resultValue = int.tryParse(_repsController.text) ?? 0;
-    }
-
-    if (resultValue == 0 && weight == 0) return; 
-
-    final db = Provider.of<DatabaseService>(context, listen: false);
-    db.logSet(LogEntry(
-      id: DateTime.now().toIso8601String(),
-      exerciseId: widget.exercise.name, 
-      exerciseName: widget.exercise.name,
-      weight: weight,
-      reps: resultValue,
-      volumeLoad: weight * resultValue,
-      timestamp: DateTime.now().toIso8601String(),
-    ));
-
-    Provider.of<WorkoutPlayerService>(context, listen: false).completeSet(widget.exercise.restSeconds);
-
-    setState(() {
-      _isCompleted = true;
-    });
   }
 }
