@@ -4,10 +4,12 @@ import 'package:provider/provider.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:connectivity_plus/connectivity_plus.dart'; // NEW: For offline check
 import '../services/database_service.dart';
 import '../models/log.dart';
 import '../models/plan.dart';
 import '../models/exercise.dart';
+import 'exercise_detail_screen.dart'; // NEW: To show details
 
 class WorkoutPlayerScreen extends StatefulWidget {
   final WorkoutDay? workoutDay;
@@ -49,10 +51,18 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
     if (widget.workoutDay == null) return;
     if (index >= widget.workoutDay!.exercises.length) return;
     
+    // Safety check for connectivity
+    final conn = await Connectivity().checkConnectivity();
+    if (conn == ConnectivityResult.none) return;
+
     final name = widget.workoutDay!.exercises[index].name;
-    final data = await Supabase.instance.client.from('exercises').select().ilike('name', name).limit(1).maybeSingle();
-    if (data != null && mounted) {
-      setState(() => _currentWikiData = Exercise.fromJson(data));
+    try {
+      final data = await Supabase.instance.client.from('exercises').select().ilike('name', name).limit(1).maybeSingle();
+      if (data != null && mounted) {
+        setState(() => _currentWikiData = Exercise.fromJson(data));
+      }
+    } catch (e) {
+      debugPrint("HIIT Image Load Error: $e");
     }
   }
 
@@ -263,6 +273,57 @@ class _ExerciseCard extends StatelessWidget {
 
   const _ExerciseCard({required this.exercise, this.oneRepMax});
 
+  /// Fetches details and navigates
+  Future<void> _showDetails(BuildContext context) async {
+    // 1. Fail Fast Offline
+    final connectivity = await Connectivity().checkConnectivity();
+    if (connectivity == ConnectivityResult.none) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("You are offline. Cannot load exercise details.")),
+        );
+      }
+      return;
+    }
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Loading details..."), duration: Duration(milliseconds: 800)),
+      );
+    }
+
+    try {
+      final data = await Supabase.instance.client
+          .from('exercises')
+          .select()
+          .ilike('name', exercise.name)
+          .limit(1)
+          .maybeSingle();
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        
+        if (data != null) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => ExerciseDetailScreen(exercise: Exercise.fromJson(data))),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Details not found in Wiki.")),
+          );
+        }
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error: $e")),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Card(
@@ -272,7 +333,17 @@ class _ExerciseCard extends StatelessWidget {
           ListTile(
             title: Text(exercise.name, style: const TextStyle(fontWeight: FontWeight.bold)),
             subtitle: Text("Rest: ${exercise.restSeconds}s"),
-            trailing: Text(exercise.intensity ?? ""),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                 if (exercise.intensity != null)
+                   Text(exercise.intensity!, style: const TextStyle(color: Colors.grey)),
+                 const SizedBox(width: 4),
+                 const Icon(Icons.info_outline, color: Colors.blueAccent),
+              ],
+            ),
+            // NEW: Tap to view details
+            onTap: () => _showDetails(context),
           ),
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 16.0),

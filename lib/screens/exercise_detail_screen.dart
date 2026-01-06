@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart'; 
 import 'package:google_fonts/google_fonts.dart';
+import 'package:cached_network_image/cached_network_image.dart'; // NEW
 import '../models/exercise.dart';
 
 class ExerciseDetailScreen extends StatelessWidget {
@@ -72,7 +73,6 @@ class ExerciseDetailScreen extends StatelessWidget {
                         borderRadius: BorderRadius.circular(16),
                         boxShadow: [
                           BoxShadow(
-                            // Fixed: withOpacity -> withValues
                             color: Colors.black.withValues(alpha: 0.1),
                             blurRadius: 8,
                             offset: const Offset(0, 4),
@@ -81,14 +81,18 @@ class ExerciseDetailScreen extends StatelessWidget {
                       ),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(16),
-                        child: Image.network(
-                          imageUrl,
+                        child: CachedNetworkImage(
+                          imageUrl: imageUrl,
                           fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            // DEBUG: This will print the exact failing URL to your console
-                            debugPrint("FAILED URL: $imageUrl");
-                            debugPrint("ERROR: $error");
-                            return Container(
+                          placeholder: (context, url) => Center(
+                            child: CircularProgressIndicator(
+                              value: null, 
+                              color: renewalTeal.withValues(alpha: 0.5),
+                            ),
+                          ),
+                          errorWidget: (context, url, error) {
+                             debugPrint("FAILED URL: $imageUrl - ERROR: $error");
+                             return Container(
                               color: Colors.grey[200],
                               child: const Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
@@ -97,17 +101,6 @@ class ExerciseDetailScreen extends StatelessWidget {
                                   SizedBox(height: 8),
                                   Text("Image Unavailable", style: TextStyle(color: Colors.grey)),
                                 ],
-                              ),
-                            );
-                          },
-                          loadingBuilder: (context, child, loadingProgress) {
-                            if (loadingProgress == null) return child;
-                            return Center(
-                              child: CircularProgressIndicator(
-                                value: loadingProgress.expectedTotalBytes != null
-                                    ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
-                                    : null,
-                                color: renewalTeal,
                               ),
                             );
                           },
@@ -130,7 +123,6 @@ class ExerciseDetailScreen extends StatelessWidget {
                     children: [
                       ...exercise.primaryMuscles.map((m) => Chip(
                         label: Text(m.toUpperCase()),
-                        // Fixed: withOpacity -> withValues
                         backgroundColor: renewalTeal.withValues(alpha: 0.1),
                         labelStyle: const TextStyle(color: renewalTeal, fontWeight: FontWeight.bold, fontSize: 12),
                         padding: EdgeInsets.zero,
@@ -186,7 +178,6 @@ class ExerciseDetailScreen extends StatelessWidget {
                             width: 24,
                             height: 24,
                             alignment: Alignment.center,
-                            // Fixed: Added const
                             decoration: const BoxDecoration(
                               color: renewalTeal,
                               shape: BoxShape.circle,

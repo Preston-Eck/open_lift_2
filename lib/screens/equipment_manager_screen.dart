@@ -69,9 +69,17 @@ class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> {
             child: ListTile(
               title: Text(bundle.name),
               subtitle: Text(bundle.description),
-              trailing: ElevatedButton(
-                onPressed: () => _applyBundle(bundle),
-                child: const Text("Add All"),
+              // FIX: Constrained width to prevent layout crash
+              trailing: SizedBox(
+                width: 100, 
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: const Size(0, 36), // Compact button
+                  ),
+                  onPressed: () => _applyBundle(bundle),
+                  child: const Text("Add All", style: TextStyle(fontSize: 12)),
+                ),
               ),
             ),
           )),
@@ -91,7 +99,7 @@ class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> {
                 selected: isSelected,
                 onSelected: (_) => _toggleItem(item),
                 checkmarkColor: Colors.white,
-                // FIX: Replaced withOpacity with withValues
+                // FIX: Use withValues to fix deprecation warning
                 selectedColor: Colors.green.withValues(alpha: 0.3),
               );
             }).toList(),

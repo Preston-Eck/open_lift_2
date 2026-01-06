@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:connectivity_plus/connectivity_plus.dart'; // NEW
 import '../models/plan.dart';
 import 'package:uuid/uuid.dart';
 
@@ -15,15 +16,25 @@ class GeminiService {
     _model = GenerativeModel(model: 'gemini-2.0-flash', apiKey: apiKey);
   }
 
+  /// Checks if the device has an active internet connection
+  Future<void> _checkConnectivity() async {
+    final result = await Connectivity().checkConnectivity();
+    if (result == ConnectivityResult.none) {
+      throw Exception("No internet connection. AI features require online access.");
+    }
+  }
+
   Future<WorkoutPlan?> generateFullPlan(
     String goal, 
     String daysPerWeek, 
-    int timeAvailableMins, // NEW ARGUMENT
+    int timeAvailableMins,
     List<String> equipment,
     Map<String, String> userProfile,
     String strengthStats
   ) async {
-    
+    // 1. Fail fast if offline
+    await _checkConnectivity();
+
     final profileString = userProfile.entries.map((e) => "${e.key}: ${e.value}").join(', ');
 
     const schema = '''

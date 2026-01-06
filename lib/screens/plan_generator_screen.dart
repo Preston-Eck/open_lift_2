@@ -31,10 +31,16 @@ class _PlanGeneratorScreenState extends State<PlanGeneratorScreen> {
     final gemini = context.read<GeminiService>();
     
     try {
-      // 2. Fetch User Equipment (Critical: Don't suggest machines if user only has dumbbells)
+      // 2. Fetch User Equipment
       final equipment = await db.getOwnedEquipment();
       if (equipment.isEmpty) {
-        throw Exception("Please add equipment in the Dashboard first!");
+        // IMPROVED: Guide user instead of crashing
+        if (mounted) {
+           ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("You need equipment to generate a plan!"))
+          );
+        }
+        return; // Stop execution safely
       }
 
       // 3. Fetch User Profile (Age, Gender, etc. from Settings)
@@ -167,12 +173,20 @@ class _PlanGeneratorScreenState extends State<PlanGeneratorScreen> {
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
                   onPressed: () async {
                     if (_generatedPlan != null) {
-                      await context.read<DatabaseService>().savePlan(_generatedPlan!);
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text("Plan Saved Successfully!"))
-                        );
-                        Navigator.pop(context);
+                      try {
+                        await context.read<DatabaseService>().savePlan(_generatedPlan!);
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text("Plan Saved Successfully!"))
+                          );
+                          Navigator.pop(context);
+                        }
+                      } catch (e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text("Save failed: $e"), backgroundColor: Colors.red),
+                          );
+                        }
                       }
                     }
                   },

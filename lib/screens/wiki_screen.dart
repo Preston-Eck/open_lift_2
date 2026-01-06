@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:connectivity_plus/connectivity_plus.dart'; // NEW
 import '../models/exercise.dart';
 import 'exercise_detail_screen.dart';
 import 'add_exercise_screen.dart';
@@ -16,6 +17,7 @@ class _WikiScreenState extends State<WikiScreen> {
   final TextEditingController _searchController = TextEditingController();
   List<Exercise> _exercises = [];
   bool _isLoading = false;
+  bool _isOffline = false; // Track offline state
 
   @override
   void initState() {
@@ -25,15 +27,31 @@ class _WikiScreenState extends State<WikiScreen> {
 
   Future<void> _fetchExercises([String? query]) async {
     setState(() => _isLoading = true);
+    
+    // 1. Check Connectivity
+    final connectivity = await Connectivity().checkConnectivity();
+    if (connectivity == ConnectivityResult.none) {
+      if (mounted) {
+        setState(() {
+          _isOffline = true;
+          _isLoading = false;
+          _exercises = []; // Or load local cache if we implemented it
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("You are offline. Cannot search Wiki."))
+        );
+      }
+      return;
+    }
+
     try {
+      setState(() => _isOffline = false);
       var dbQuery = _supabase.from('exercises').select();
       
       if (query != null && query.isNotEmpty) {
-        // 'ilike' performs a case-insensitive search
         dbQuery = dbQuery.ilike('name', '%$query%');
       }
       
-      // Limit to 50 results to prevent UI lag
       final data = await dbQuery.order('name').limit(50);
       
       if (mounted) {
@@ -65,7 +83,6 @@ class _WikiScreenState extends State<WikiScreen> {
       ),
       body: Column(
         children: [
-          // Search Bar
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: TextField(
@@ -78,7 +95,7 @@ class _WikiScreenState extends State<WikiScreen> {
                   icon: const Icon(Icons.clear),
                   onPressed: () {
                     _searchController.clear();
-                    _fetchExercises(); // Reset list
+                    _fetchExercises(); 
                   },
                 ),
               ),
@@ -86,33 +103,53 @@ class _WikiScreenState extends State<WikiScreen> {
             ),
           ),
           
-          // Exercise List
           Expanded(
             child: _isLoading 
               ? const Center(child: CircularProgressIndicator())
-              : _exercises.isEmpty 
-                  ? const Center(child: Text("No exercises found."))
-                  : ListView.builder(
-                      itemCount: _exercises.length,
-                      itemBuilder: (context, index) {
-                        final ex = _exercises[index];
-                        final muscles = ex.primaryMuscles.isNotEmpty 
-                            ? ex.primaryMuscles.join(', ') 
-                            : 'General';
-                        
-                        return ListTile(
-                          title: Text(ex.name),
-                          subtitle: Text(muscles, maxLines: 1, overflow: TextOverflow.ellipsis),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: () {
-                            Navigator.push(
-                              context, 
-                              MaterialPageRoute(builder: (_) => ExerciseDetailScreen(exercise: ex))
+              : _isOffline 
+                  ? _buildOfflineView()
+                  : _exercises.isEmpty 
+                      ? const Center(child: Text("No exercises found."))
+                      : ListView.builder(
+                          itemCount: _exercises.length,
+                          itemBuilder: (context, index) {
+                            final ex = _exercises[index];
+                            final muscles = ex.primaryMuscles.isNotEmpty 
+                                ? ex.primaryMuscles.join(', ') 
+                                : 'General';
+                            
+                            return ListTile(
+                              title: Text(ex.name),
+                              subtitle: Text(muscles, maxLines: 1, overflow: TextOverflow.ellipsis),
+                              trailing: const Icon(Icons.chevron_right),
+                              onTap: () {
+                                Navigator.push(
+                                  context, 
+                                  MaterialPageRoute(builder: (_) => ExerciseDetailScreen(exercise: ex))
+                                );
+                              },
                             );
                           },
-                        );
-                      },
-                    ),
+                        ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOfflineView() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.wifi_off, size: 64, color: Colors.grey),
+          const SizedBox(height: 16),
+          const Text("You are offline.", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const Text("The Wiki requires internet to search."),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: _fetchExercises,
+            child: const Text("Retry Connection"),
           ),
         ],
       ),

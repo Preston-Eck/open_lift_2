@@ -21,7 +21,7 @@ class DatabaseService extends ChangeNotifier {
 
     return await openDatabase(
       path,
-      version: 6, 
+      version: 7, // CHANGED: Bumped version
       onCreate: (db, version) async {
         await _createTables(db);
       },
@@ -56,6 +56,11 @@ class DatabaseService extends ChangeNotifier {
             )
           ''');
         }
+        // NEW: Migration for 'type' column
+        if (oldVersion < 7) {
+          // Check if column exists or just try adding it. Adding a default value prevents errors on existing rows.
+          await db.execute('ALTER TABLE workout_plans ADD COLUMN type TEXT DEFAULT "Strength"');
+        }
       }
     );
   }
@@ -63,7 +68,8 @@ class DatabaseService extends ChangeNotifier {
   Future<void> _createTables(Database db) async {
     await db.execute('CREATE TABLE user_equipment (id TEXT PRIMARY KEY, name TEXT, is_owned INTEGER)');
     await db.execute('CREATE TABLE workout_logs (id TEXT PRIMARY KEY, exercise_id TEXT, exercise_name TEXT, weight REAL, reps INTEGER, volume_load REAL, timestamp TEXT)');
-    await db.execute('CREATE TABLE workout_plans (id TEXT PRIMARY KEY, name TEXT, goal TEXT, schedule_json TEXT)');
+    // UPDATED: Added 'type' column
+    await db.execute('CREATE TABLE workout_plans (id TEXT PRIMARY KEY, name TEXT, goal TEXT, type TEXT, schedule_json TEXT)');
     await db.execute('CREATE TABLE exercise_stats (exercise_name TEXT PRIMARY KEY, one_rep_max REAL, last_updated TEXT)');
     await db.execute('CREATE TABLE body_metrics (id TEXT PRIMARY KEY, date TEXT, weight REAL, measurements_json TEXT)');
     await db.execute('CREATE TABLE one_rep_max_history (id TEXT PRIMARY KEY, exercise_name TEXT, weight REAL, date TEXT)');

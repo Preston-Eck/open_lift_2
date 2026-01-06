@@ -9,19 +9,23 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  # State Management
+  
+# State Management
   provider: ^6.0.0
-  # Backend & Local DB
+  
+# Backend & Local DB
   supabase_flutter: ^2.0.0
   sqflite: ^2.3.0
   path: ^1.8.3
   sqflite_common_ffi: ^2.3.0
-  # UI Components
+  
+# UI Components
   google_fonts: ^6.1.0
   fl_chart: ^0.63.0
   flutter_markdown: ^0.6.14
   percent_indicator: ^4.2.3
-  # Utilities
+  
+# Utilities
   uuid: ^4.0.0
   shared_preferences: ^2.2.0
   google_generative_ai: ^0.4.6
@@ -29,6 +33,10 @@ dependencies:
   wakelock_plus: ^1.1.0
   flutter_dotenv: ^5.1.0 
   intl: ^0.18.0
+  
+# Offline Polish
+  cached_network_image: ^3.3.0
+  connectivity_plus: ^5.0.2
 
 
 dev_dependencies:
