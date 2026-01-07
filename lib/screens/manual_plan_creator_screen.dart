@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
+import 'package:supabase_flutter/supabase_flutter.dart'; // NEW
 import '../models/plan.dart';
+import '../models/exercise.dart'; // NEW
 import '../services/database_service.dart';
 
 class ManualPlanCreatorScreen extends StatefulWidget {
@@ -52,10 +54,14 @@ class _ManualPlanCreatorScreenState extends State<ManualPlanCreatorScreen> {
   }
 
   void _addExercise(int dayIndex) {
+    // We use a separate controller for the Autocomplete's text logic if needed,
+    // but Autocomplete passes the value in onSelected.
+    // However, we need a way to capture the text even if they don't select an option (custom exercise).
+    String selectedName = ""; 
+
     showDialog(
       context: context,
       builder: (ctx) {
-        final nameCtrl = TextEditingController();
         final setsCtrl = TextEditingController(text: "3");
         final repsCtrl = TextEditingController(text: "10");
         final restCtrl = TextEditingController(text: "60");
@@ -67,7 +73,47 @@ class _ManualPlanCreatorScreenState extends State<ManualPlanCreatorScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: "Name")),
+                // CHANGED: Replaced TextField with Autocomplete
+                Autocomplete<Exercise>(
+                  optionsBuilder: (TextEditingValue textEditingValue) async {
+                    if (textEditingValue.text.isEmpty) {
+                      return const Iterable<Exercise>.empty();
+                    }
+                    try {
+                      // Query Supabase for matching names
+                      final data = await Supabase.instance.client
+                          .from('exercises')
+                          .select()
+                          .ilike('name', '%${textEditingValue.text}%')
+                          .limit(5);
+                      return (data as List).map((e) => Exercise.fromJson(e));
+                    } catch (e) {
+                      debugPrint("Autocomplete Error: $e");
+                      return const Iterable<Exercise>.empty();
+                    }
+                  },
+                  displayStringForOption: (Exercise option) => option.name,
+                  onSelected: (Exercise selection) {
+                    selectedName = selection.name;
+                  },
+                  fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
+                    // Update local var when typing custom text
+                    textEditingController.addListener(() {
+                      selectedName = textEditingController.text;
+                    });
+                    return TextField(
+                      controller: textEditingController,
+                      focusNode: focusNode,
+                      decoration: const InputDecoration(
+                        labelText: "Exercise Name",
+                        hintText: "Search Wiki...",
+                        prefixIcon: Icon(Icons.search),
+                        border: OutlineInputBorder(),
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 10),
                 Row(
                   children: [
                     Expanded(child: TextField(controller: setsCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Sets"))),
@@ -88,10 +134,10 @@ class _ManualPlanCreatorScreenState extends State<ManualPlanCreatorScreen> {
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
             ElevatedButton(
               onPressed: () {
-                if (nameCtrl.text.isNotEmpty) {
+                if (selectedName.isNotEmpty) {
                   setState(() {
                     _days[dayIndex].exercises.add(WorkoutExercise(
-                      name: nameCtrl.text,
+                      name: selectedName,
                       sets: int.tryParse(setsCtrl.text) ?? 3,
                       reps: repsCtrl.text,
                       restSeconds: int.tryParse(restCtrl.text) ?? 60,

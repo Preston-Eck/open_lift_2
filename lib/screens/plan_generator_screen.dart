@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart'; // NEW
 import '../services/database_service.dart';
 import '../services/gemini_service.dart';
 import '../models/plan.dart';
@@ -19,9 +20,7 @@ class _PlanGeneratorScreenState extends State<PlanGeneratorScreen> {
   bool _isLoading = false;
   WorkoutPlan? _generatedPlan;
 
-  /// Main function to gather data and call the AI
   Future<void> _generatePlan() async {
-    // 1. Update UI to show loading state
     setState(() {
       _isLoading = true;
       _generatedPlan = null; 
@@ -31,19 +30,18 @@ class _PlanGeneratorScreenState extends State<PlanGeneratorScreen> {
     final gemini = context.read<GeminiService>();
     
     try {
-      // 2. Fetch User Equipment
+      // 1. Fetch Local Data
       final equipment = await db.getOwnedEquipment();
       if (equipment.isEmpty) {
-        // IMPROVED: Guide user instead of crashing
         if (mounted) {
            ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text("You need equipment to generate a plan!"))
           );
         }
-        return; // Stop execution safely
+        setState(() => _isLoading = false);
+        return;
       }
 
-      // 3. Fetch User Profile (Age, Gender, etc. from Settings)
       final prefs = await SharedPreferences.getInstance();
       final userProfile = {
         'Age': prefs.getString('user_age') ?? 'Unknown',
@@ -53,30 +51,40 @@ class _PlanGeneratorScreenState extends State<PlanGeneratorScreen> {
         'Fitness Level': prefs.getString('user_fitness_level') ?? 'Intermediate',
       };
 
-      // 4. Fetch Strength Stats (NEW: Get 1RMs from Database)
       final oneRepMaxes = await db.getLatestOneRepMaxes();
-      // Format map into readable string: "Bench Press: 200.0, Squat: 315.0"
       final strengthStats = oneRepMaxes.isEmpty 
           ? "No recorded strength data (assume beginner)"
           : oneRepMaxes.entries.map((e) => "${e.key}: ${e.value}lbs").join(", ");
 
-      // 5. Call AI with all the gathered context
+      // 2. NEW: Fetch Wiki Vocabulary (RAG)
+      List<String> validExercises = [];
+      try {
+        final response = await Supabase.instance.client
+            .from('exercises')
+            .select('name')
+            .limit(100); // Fetch top 100 for context
+        validExercises = (response as List).map((e) => e['name'] as String).toList();
+      } catch (e) {
+        debugPrint("Supabase Fetch Error (Offline?): $e");
+        // Fallback: If offline, Gemini will just guess, which is acceptable
+      }
+
+      // 3. Call AI
       final plan = await gemini.generateFullPlan(
         _goalController.text,
         _daysPerWeek,
-        int.tryParse(_timeController.text) ?? 60, // Pass time
+        int.tryParse(_timeController.text) ?? 60,
         equipment,
         userProfile,
         strengthStats, 
+        validExercises, // Pass the vocabulary
       );
       
-      // 6. Update UI with the result
       setState(() {
         _generatedPlan = plan;
       });
 
     } catch (e) {
-      // 7. Handle Errors Gracefully
       if (mounted) {
         showDialog(
           context: context,
@@ -90,7 +98,6 @@ class _PlanGeneratorScreenState extends State<PlanGeneratorScreen> {
         );
       }
     } finally {
-      // 8. Stop loading spinner regardless of success/failure
       if (mounted) setState(() => _isLoading = false);
     }
   }
@@ -109,7 +116,7 @@ class _PlanGeneratorScreenState extends State<PlanGeneratorScreen> {
             TextField(
               controller: _goalController,
               decoration: const InputDecoration(
-                hintText: "e.g., Build chest muscle, lose weight, train for 5k",
+                hintText: "e.g., Build chest muscle, lose weight, HIIT cardio",
                 border: OutlineInputBorder(),
               ),
               maxLines: 2,
@@ -152,6 +159,7 @@ class _PlanGeneratorScreenState extends State<PlanGeneratorScreen> {
 
             if (_generatedPlan != null) ...[
               Text("Plan: ${_generatedPlan!.name}", style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.green)),
+              Text("Type: ${_generatedPlan!.type}", style: const TextStyle(fontSize: 16, color: Colors.grey)),
               const SizedBox(height: 10),
               ..._generatedPlan!.days.map((day) => Card(
                 margin: const EdgeInsets.only(bottom: 10),
@@ -160,8 +168,7 @@ class _PlanGeneratorScreenState extends State<PlanGeneratorScreen> {
                   children: day.exercises.map((ex) => ListTile(
                     leading: const Icon(Icons.fitness_center),
                     title: Text(ex.name),
-                    subtitle: Text("${ex.sets} sets x ${ex.reps} reps${ex.secondsPerSet > 0 ? ' (${ex.secondsPerSet}s)' : ''}"),
-                    trailing: ex.intensity != null ? Chip(label: Text(ex.intensity!)) : null,
+                    subtitle: Text("${ex.sets} sets x ${ex.reps} ${ex.secondsPerSet > 0 ? '(${ex.secondsPerSet}s)' : ''}"),
                   )).toList(),
                 ),
               )),

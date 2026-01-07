@@ -1,70 +1,58 @@
-import 'dart:io'; 
+import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart'; 
 import 'package:provider/provider.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart'; 
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
-// Screens
-import 'screens/home_screen.dart'; // CHANGED: Import HomeScreen
-
-// Services
-import 'services/auth_service.dart';
 import 'services/database_service.dart';
 import 'services/gemini_service.dart';
-import 'services/workout_player_service.dart';
-
-// Theme
+import 'services/logger_service.dart';
 import 'theme.dart';
+import 'screens/dashboard_screen.dart'; // Ensure this matches your file structure
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+Future<void> main() async {
+  runZonedGuarded(() async {
+    WidgetsFlutterBinding.ensureInitialized();
+    await LoggerService().init();
 
-  // 1. Initialize Database Factory for Desktop
-  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-    sqfliteFfiInit();
-    databaseFactory = databaseFactoryFfi;
-  }
+    try {
+      await dotenv.load(fileName: ".env");
+      
+      await Supabase.initialize(
+        url: dotenv.env['SUPABASE_URL']!,
+        anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
+      );
+    } catch (e, stack) {
+      LoggerService().log("Startup Error", e, stack);
+    }
 
-  // 2. Load Environment Variables
-  try {
-    await dotenv.load(fileName: ".env");
-  } catch (e) {
-    debugPrint("Warning: .env file not found. Supabase features may fail.");
-  }
+    FlutterError.onError = (FlutterErrorDetails details) {
+      LoggerService().log("Flutter Error", details.exception, details.stack);
+      FlutterError.presentError(details);
+    };
 
-  // 3. Initialize Supabase
-  try {
-    await Supabase.initialize(
-      url: dotenv.env['SUPABASE_URL'] ?? '',
-      anonKey: dotenv.env['SUPABASE_ANON_KEY'] ?? '',
+    runApp(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider(create: (_) => DatabaseService()),
+          Provider(create: (_) => GeminiService()),
+        ],
+        child: const MyApp(),
+      ),
     );
-  } catch (e) {
-    debugPrint("Supabase Initialization Warning: $e");
-  }
-
-  runApp(
-    MultiProvider(
-      providers: [
-        ChangeNotifierProvider(create: (_) => AuthService()),
-        ChangeNotifierProvider(create: (_) => DatabaseService()),
-        Provider(create: (_) => GeminiService()), 
-        ChangeNotifierProvider(create: (_) => WorkoutPlayerService()),
-      ],
-      child: const OpenLiftApp(),
-    ),
-  );
+  }, (error, stack) {
+    LoggerService().log("Async Error", error, stack);
+  });
 }
 
-class OpenLiftApp extends StatelessWidget {
-  const OpenLiftApp({super.key});
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'OpenLift',
-      theme: AppTheme.lightTheme, 
-      home: const HomeScreen(), // CHANGED: Reverted to HomeScreen
+      title: 'OpenLift 2.0',
+      theme: AppTheme.lightTheme,
+      home: const DashboardScreen(),
       debugShowCheckedModeBanner: false,
     );
   }

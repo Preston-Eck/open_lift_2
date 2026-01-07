@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:connectivity_plus/connectivity_plus.dart'; // NEW
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart'; // NEW
+import 'package:cached_network_image/cached_network_image.dart'; // NEW
 import '../models/exercise.dart';
 import 'exercise_detail_screen.dart';
 import 'add_exercise_screen.dart';
@@ -17,7 +19,7 @@ class _WikiScreenState extends State<WikiScreen> {
   final TextEditingController _searchController = TextEditingController();
   List<Exercise> _exercises = [];
   bool _isLoading = false;
-  bool _isOffline = false; // Track offline state
+  bool _isOffline = false;
 
   @override
   void initState() {
@@ -28,14 +30,13 @@ class _WikiScreenState extends State<WikiScreen> {
   Future<void> _fetchExercises([String? query]) async {
     setState(() => _isLoading = true);
     
-    // 1. Check Connectivity
     final connectivity = await Connectivity().checkConnectivity();
     if (connectivity == ConnectivityResult.none) {
       if (mounted) {
         setState(() {
           _isOffline = true;
           _isLoading = false;
-          _exercises = []; // Or load local cache if we implemented it
+          _exercises = [];
         });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("You are offline. Cannot search Wiki."))
@@ -66,6 +67,21 @@ class _WikiScreenState extends State<WikiScreen> {
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  // Reuse logic for image URL
+  String? _getThumbnailUrl(Exercise ex) {
+    if (ex.images.isEmpty) return null;
+    
+    String path = ex.images.first;
+    if (path.startsWith('http')) return path;
+    
+    final supabaseUrl = dotenv.env['SUPABASE_URL'];
+    if (supabaseUrl == null || supabaseUrl.isEmpty) return null;
+
+    final baseUrl = supabaseUrl.endsWith('/') ? supabaseUrl : "$supabaseUrl/";
+    final cleanPath = path.startsWith('/') ? path.substring(1) : path;
+    return "${baseUrl}storage/v1/object/public/exercises/$cleanPath"; 
   }
 
   @override
@@ -118,7 +134,32 @@ class _WikiScreenState extends State<WikiScreen> {
                                 ? ex.primaryMuscles.join(', ') 
                                 : 'General';
                             
+                            // Updated: Added Leading Thumbnail
+                            final thumbUrl = _getThumbnailUrl(ex);
+
                             return ListTile(
+                              leading: Container(
+                                width: 50,
+                                height: 50,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(8),
+                                  color: Colors.grey[200],
+                                ),
+                                child: thumbUrl != null 
+                                  ? ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: CachedNetworkImage(
+                                        imageUrl: thumbUrl,
+                                        fit: BoxFit.cover,
+                                        errorWidget: (c,u,e) => const Icon(Icons.fitness_center, size: 20, color: Colors.grey),
+                                        placeholder: (c,u) => const Padding(
+                                          padding: EdgeInsets.all(12.0),
+                                          child: CircularProgressIndicator(strokeWidth: 2),
+                                        ),
+                                      ),
+                                    )
+                                  : const Icon(Icons.fitness_center, size: 20, color: Colors.grey),
+                              ),
                               title: Text(ex.name),
                               subtitle: Text(muscles, maxLines: 1, overflow: TextOverflow.ellipsis),
                               trailing: const Icon(Icons.chevron_right),

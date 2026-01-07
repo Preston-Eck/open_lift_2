@@ -6,14 +6,15 @@ import '../services/database_service.dart';
 import '../models/log.dart';
 
 class ExerciseAnalyticsScreen extends StatefulWidget {
-  const ExerciseAnalyticsScreen({super.key});
+  final String? initialExercise; // NEW: Accept deep link
+  const ExerciseAnalyticsScreen({super.key, this.initialExercise});
 
   @override
   State<ExerciseAnalyticsScreen> createState() => _ExerciseAnalyticsScreenState();
 }
 
 class _ExerciseAnalyticsScreenState extends State<ExerciseAnalyticsScreen> {
-  // Data State
+  // ... existing state variables ...
   String? _selectedExercise;
   List<LogEntry> _fullHistory = [];
   List<LogEntry> _filteredHistory = [];
@@ -21,7 +22,7 @@ class _ExerciseAnalyticsScreenState extends State<ExerciseAnalyticsScreen> {
   
   // Filter State
   String _searchQuery = "";
-  DateTime _startDate = DateTime.now().subtract(const Duration(days: 365)); // Default 12 months
+  DateTime _startDate = DateTime.now().subtract(const Duration(days: 365)); 
   DateTime _endDate = DateTime.now();
   
   // Axis Configuration
@@ -44,7 +45,10 @@ class _ExerciseAnalyticsScreenState extends State<ExerciseAnalyticsScreen> {
     if (mounted) {
       setState(() {
         _exerciseList = list;
-        if (list.isNotEmpty) {
+        // LOGIC CHANGE: Prioritize initialExercise if provided
+        if (widget.initialExercise != null) {
+          _selectExercise(widget.initialExercise!);
+        } else if (list.isNotEmpty) {
           _selectExercise(list.first['exercise_name']);
         }
       });
@@ -53,7 +57,6 @@ class _ExerciseAnalyticsScreenState extends State<ExerciseAnalyticsScreen> {
 
   Future<void> _selectExercise(String name) async {
     final db = Provider.of<DatabaseService>(context, listen: false);
-    // Ensure getHistoryForExercise is implemented in DatabaseService
     final history = await db.getHistoryForExercise(name);
     
     if (!mounted) return;

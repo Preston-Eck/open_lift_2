@@ -1,14 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart'; 
 import 'package:google_fonts/google_fonts.dart';
-import 'package:cached_network_image/cached_network_image.dart'; // NEW
+import 'package:cached_network_image/cached_network_image.dart';
 import '../models/exercise.dart';
+import '../services/database_service.dart';
+import '../widgets/one_rep_max_dialog.dart';
+import 'strength_profile_screen.dart';
 
-class ExerciseDetailScreen extends StatelessWidget {
+class ExerciseDetailScreen extends StatefulWidget {
   final Exercise exercise;
 
   const ExerciseDetailScreen({super.key, required this.exercise});
 
+  @override
+  State<ExerciseDetailScreen> createState() => _ExerciseDetailScreenState();
+}
+
+class _ExerciseDetailScreenState extends State<ExerciseDetailScreen> {
   // Vitality Rise Colors
   static const Color renewalTeal = Color(0xFF2A9D8F);
   static const Color motivationCoral = Color(0xFFE76F51);
@@ -25,10 +34,7 @@ class ExerciseDetailScreen extends StatelessWidget {
     }
 
     final baseUrl = supabaseUrl.endsWith('/') ? supabaseUrl : "$supabaseUrl/";
-    // Remove leading slash from path if present to prevent double slash
     final cleanPath = path.startsWith('/') ? path.substring(1) : path;
-    
-    // Assumes images are in a public bucket named 'exercises'
     return "${baseUrl}storage/v1/object/public/exercises/$cleanPath"; 
   }
 
@@ -38,7 +44,7 @@ class ExerciseDetailScreen extends StatelessWidget {
       backgroundColor: clarityCream,
       appBar: AppBar(
         title: Text(
-          exercise.name,
+          widget.exercise.name,
           style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: Colors.white),
         ),
         backgroundColor: renewalTeal,
@@ -50,7 +56,7 @@ class ExerciseDetailScreen extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // --- Media Section ---
-            if (exercise.images.isNotEmpty)
+            if (widget.exercise.images.isNotEmpty)
               Container(
                 height: 280,
                 width: double.infinity,
@@ -61,9 +67,9 @@ class ExerciseDetailScreen extends StatelessWidget {
                 child: ListView.builder(
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-                  itemCount: exercise.images.length,
+                  itemCount: widget.exercise.images.length,
                   itemBuilder: (context, index) {
-                    final imageUrl = _getImageUrl(exercise.images[index]);
+                    final imageUrl = _getImageUrl(widget.exercise.images[index]);
                     if (imageUrl.isEmpty) return const SizedBox.shrink();
 
                     return Container(
@@ -90,20 +96,17 @@ class ExerciseDetailScreen extends StatelessWidget {
                               color: renewalTeal.withValues(alpha: 0.5),
                             ),
                           ),
-                          errorWidget: (context, url, error) {
-                             debugPrint("FAILED URL: $imageUrl - ERROR: $error");
-                             return Container(
-                              color: Colors.grey[200],
-                              child: const Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(Icons.broken_image, size: 40, color: Colors.grey),
-                                  SizedBox(height: 8),
-                                  Text("Image Unavailable", style: TextStyle(color: Colors.grey)),
-                                ],
-                              ),
-                            );
-                          },
+                          errorWidget: (context, url, error) => Container(
+                            color: Colors.grey[200],
+                            child: const Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.broken_image, size: 40, color: Colors.grey),
+                                SizedBox(height: 8),
+                                Text("Offline", style: TextStyle(color: Colors.grey)),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
                     );
@@ -116,28 +119,80 @@ class ExerciseDetailScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // --- Muscles Badges ---
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      ...exercise.primaryMuscles.map((m) => Chip(
+                      ...widget.exercise.primaryMuscles.map((m) => Chip(
                         label: Text(m.toUpperCase()),
                         backgroundColor: renewalTeal.withValues(alpha: 0.1),
                         labelStyle: const TextStyle(color: renewalTeal, fontWeight: FontWeight.bold, fontSize: 12),
                         padding: EdgeInsets.zero,
+                        visualDensity: VisualDensity.compact,
                       )),
-                      ...exercise.secondaryMuscles.map((m) => Chip(
-                        label: Text(m.toUpperCase()),
-                        backgroundColor: Colors.grey[200],
-                        labelStyle: const TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 12),
-                        padding: EdgeInsets.zero,
-                      )),
+                      
+                      // Database Dependent Actions
+                      FutureBuilder<Map<String, dynamic>?>(
+                        future: Provider.of<DatabaseService>(context, listen: false).getLatestOneRepMaxDetailed(widget.exercise.name),
+                        builder: (context, snapshot) {
+                          final data = snapshot.data;
+                          final double? max = data?['weight'];
+                          final String? date = data?['date'];
+                          
+                          String displayDate = "";
+                          if (date != null) {
+                             final dt = DateTime.parse(date);
+                             displayDate = "(${dt.month}/${dt.day}/${dt.year.toString().substring(2)})";
+                          }
+
+                          return Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              OutlinedButton.icon(
+                                icon: const Icon(Icons.edit, size: 14),
+                                label: Text(max != null ? "${max.toInt()} lbs $displayDate" : "Set Max"),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: motivationCoral,
+                                  side: const BorderSide(color: motivationCoral),
+                                  visualDensity: VisualDensity.compact,
+                                  textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                                  minimumSize: const Size(0, 32),
+                                ),
+                                onPressed: () async {
+                                  await showDialog(
+                                    context: context,
+                                    builder: (ctx) => EditOneRepMaxDialog(
+                                      exerciseName: widget.exercise.name,
+                                      currentMax: max,
+                                    ),
+                                  );
+                                  // Trigger rebuild to show new max immediately
+                                  setState(() {});
+                                },
+                              ),
+                              
+                              const SizedBox(width: 8),
+
+                              IconButton(
+                                icon: const Icon(Icons.show_chart, color: renewalTeal),
+                                tooltip: "View History Graph",
+                                onPressed: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(builder: (_) => StrengthProfileScreen(initialExercise: widget.exercise.name)),
+                                  );
+                                },
+                              ),
+                            ],
+                          );
+                        },
+                      ),
                     ],
                   ),
+                  
                   const SizedBox(height: 24),
 
-                  // --- Instructions Header ---
                   Row(
                     children: [
                       Container(
@@ -162,14 +217,13 @@ class ExerciseDetailScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 16),
 
-                  // --- Instructions List ---
-                  if (exercise.instructions.isEmpty)
+                  if (widget.exercise.instructions.isEmpty)
                     const Text(
                       "No detailed instructions available for this exercise.",
                       style: TextStyle(fontStyle: FontStyle.italic, color: Colors.grey),
                     )
                   else
-                    ...exercise.instructions.asMap().entries.map((entry) => Padding(
+                    ...widget.exercise.instructions.asMap().entries.map((entry) => Padding(
                       padding: const EdgeInsets.only(bottom: 16.0),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -202,16 +256,15 @@ class ExerciseDetailScreen extends StatelessWidget {
                       ),
                     )),
                     
-                   // --- Metadata ---
                    const SizedBox(height: 20),
                    Divider(color: Colors.grey[300]),
                    const SizedBox(height: 10),
-                   if (exercise.category != null)
-                     _buildMetadataRow("Category", exercise.category!),
-                   if (exercise.mechanic != null)
-                     _buildMetadataRow("Mechanic", exercise.mechanic!),
-                   if (exercise.level != null)
-                     _buildMetadataRow("Level", exercise.level!),
+                   if (widget.exercise.category != null)
+                     _buildMetadataRow("Category", widget.exercise.category!),
+                   if (widget.exercise.mechanic != null)
+                     _buildMetadataRow("Mechanic", widget.exercise.mechanic!),
+                   if (widget.exercise.level != null)
+                     _buildMetadataRow("Level", widget.exercise.level!),
                 ],
               ),
             ),

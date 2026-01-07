@@ -1,9 +1,7 @@
 import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
-import 'package:connectivity_plus/connectivity_plus.dart'; // NEW
 import '../models/plan.dart';
-import 'package:uuid/uuid.dart';
 
 class GeminiService {
   late final GenerativeModel _model;
@@ -11,88 +9,86 @@ class GeminiService {
   GeminiService() {
     final apiKey = dotenv.env['GEMINI_API_KEY'];
     if (apiKey == null) {
-      throw Exception('GEMINI_API_KEY not found in .env file');
+      throw Exception("GEMINI_API_KEY not found in .env");
     }
-    _model = GenerativeModel(model: 'gemini-2.0-flash', apiKey: apiKey);
+    _model = GenerativeModel(
+      model: 'gemini-1.5-flash',
+      apiKey: apiKey,
+    );
   }
 
-  /// Checks if the device has an active internet connection
-  Future<void> _checkConnectivity() async {
-    final result = await Connectivity().checkConnectivity();
-    if (result == ConnectivityResult.none) {
-      throw Exception("No internet connection. AI features require online access.");
-    }
-  }
-
-  Future<WorkoutPlan?> generateFullPlan(
-    String goal, 
-    String daysPerWeek, 
-    int timeAvailableMins,
+  Future<WorkoutPlan> generateFullPlan(
+    String goal,
+    String daysPerWeek,
+    int minutesPerWorkout,
     List<String> equipment,
     Map<String, String> userProfile,
-    String strengthStats
+    String strengthStats,
+    List<String> validExercises, // NEW: The Vocabulary List
   ) async {
-    // 1. Fail fast if offline
-    await _checkConnectivity();
+    
+    // Create a "Menu" string, limiting to top 100 to save tokens if list is huge
+    final exerciseMenu = validExercises.take(100).join(", ");
 
-    final profileString = userProfile.entries.map((e) => "${e.key}: ${e.value}").join(', ');
-
-    const schema = '''
+    final prompt = '''
+    Act as an elite strength and conditioning coach.
+    Create a $daysPerWeek-day workout plan for: "$goal".
+    
+    USER PROFILE:
+    $userProfile
+    
+    STRENGTH STATS (1 Rep Maxes):
+    $strengthStats
+    
+    AVAILABLE EQUIPMENT:
+    ${equipment.join(', ')}
+    
+    CONSTRAINTS:
+    1. Time Limit: $minutesPerWorkout minutes per session.
+    2. VALID EXERCISES: You MUST prefer exercises from this list: [$exerciseMenu]. Only use other names if absolutely necessary.
+    3. FORMAT: Return ONLY valid JSON. No markdown formatting.
+    
+    JSON STRUCTURE:
     {
-      "name": "Plan Name",
-      "goal": "Goal",
-      "type": "Strength OR HIIT", 
+      "name": "Plan Name (e.g. Powerbuilding Phase 1)",
+      "goal": "Short description",
+      "type": "Strength" or "HIIT",
       "days": [
         {
-          "name": "Day 1",
+          "name": "Day 1 - Upper Power",
           "exercises": [
             {
-              "name": "Exercise Name",
+              "name": "Exercise Name (Use Exact Wiki Name)",
               "sets": 3,
-              "reps": "12",
-              "restSeconds": 60,
-              "intensity": "RPE 8",
-              "secondsPerSet": 0
+              "reps": "8-12",
+              "rest_seconds": 90,
+              "seconds_per_set": 0 (Use 0 for normal reps, or e.g. 60 for timed planks)
             }
           ]
         }
       ]
     }
+    
+    CRITICAL INSTRUCTION: 
+    If the goal implies cardio/conditioning (e.g. "HIIT", "Tabata", "Circuit"), set "type": "HIIT" and ensure "seconds_per_set" is set for time-based moves.
     ''';
 
-    final prompt = '''
-      Create a $daysPerWeek-day workout plan.
-      User Goal: "$goal".
-      Time Available: $timeAvailableMins mins/session.
-      
-      CONTEXT:
-      Profile: $profileString
-      Strength: $strengthStats
-      Equipment: ${equipment.join(', ')}
-
-      LOGIC:
-      1. If goal implies cardio/fat loss AND time < 30 mins, set "type" to "HIIT".
-      2. If goal is muscle/strength, set "type" to "Strength".
-      3. For HIIT: "secondsPerSet" should be > 0 (e.g., 45), "reps" is "0". Low rest (15s).
-      4. For Strength: "secondsPerSet" is 0. Normal rest (90s+).
-      
-      OUTPUT JSON (NO MARKDOWN):
-      $schema
-    ''';
-
-    final content = [Content.text(prompt)];
-    final response = await _model.generateContent(content);
-    
-    if (response.text == null) throw Exception("Empty AI response");
-
-    String cleanedText = response.text!.replaceAll('```json', '').replaceAll('```', '').trim();
-    
     try {
-      final Map<String, dynamic> jsonMap = jsonDecode(cleanedText);
-      jsonMap['id'] = const Uuid().v4();
-      return WorkoutPlan.fromJson(jsonMap);
+      final content = [Content.text(prompt)];
+      final response = await _model.generateContent(content);
+      
+      final cleanJson = response.text!.replaceAll('```json', '').replaceAll('```', '');
+      final Map<String, dynamic> data = jsonDecode(cleanJson);
+      
+      return WorkoutPlan.fromMap({
+        'id': DateTime.now().toIso8601String(),
+        'name': data['name'],
+        'goal': data['goal'],
+        'type': data['type'] ?? 'Strength', // Support new type
+        'schedule_json': jsonEncode(data['days']),
+      });
     } catch (e) {
-      throw Exception("Failed to parse AI response: $e");
+      throw Exception("AI Generation Failed: $e");
     }
   }
 }

@@ -12,6 +12,7 @@ import 'analytics_screen.dart';
 import 'settings_screen.dart';
 import 'wiki_screen.dart';
 import 'exercise_analytics_screen.dart';
+import 'global_search_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -25,6 +26,12 @@ class HomeScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text("Dashboard"),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.search),
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const GlobalSearchScreen()));
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.settings),
             onPressed: () {
