@@ -22,7 +22,7 @@ class DatabaseService extends ChangeNotifier {
 
     return await openDatabase(
       path,
-      version: 9,
+      version: 10, // UPDATED: Version 10
       onCreate: (db, version) async {
         await _createTables(db);
       },
@@ -45,6 +45,10 @@ class DatabaseService extends ChangeNotifier {
             debugPrint("Migration Note: $e");
           }
         }
+        // NEW: Schema v10 - Aliases
+        if (oldVersion < 10) {
+          await db.execute('CREATE TABLE exercise_aliases (original_name TEXT PRIMARY KEY, alias TEXT)');
+        }
       }
     );
   }
@@ -58,6 +62,8 @@ class DatabaseService extends ChangeNotifier {
     await db.execute('CREATE TABLE one_rep_max_history (id TEXT PRIMARY KEY, exercise_name TEXT, weight REAL, date TEXT)');
     await db.execute('CREATE TABLE custom_exercises (id TEXT PRIMARY KEY, name TEXT, category TEXT, primary_muscles TEXT, notes TEXT)');
     await db.execute('CREATE TABLE workout_sessions (id TEXT PRIMARY KEY, plan_id TEXT, day_name TEXT, start_time TEXT, end_time TEXT, note TEXT)');
+    // v10
+    await db.execute('CREATE TABLE exercise_aliases (original_name TEXT PRIMARY KEY, alias TEXT)');
   }
 
   Future<void> _cleanupGhostSessions(Database db) async {
@@ -71,6 +77,39 @@ class DatabaseService extends ChangeNotifier {
     } catch (e) {
       debugPrint("Cleanup Error: $e");
     }
+  }
+
+  // ==========================================
+  //                ALIASES (NEW)
+  // ==========================================
+  Future<void> setExerciseAlias(String original, String alias) async {
+    final db = await database;
+    if (alias.isEmpty || alias == original) {
+      await removeAlias(original);
+      return;
+    }
+    await db.insert(
+      'exercise_aliases', 
+      {'original_name': original, 'alias': alias}, 
+      conflictAlgorithm: ConflictAlgorithm.replace
+    );
+    notifyListeners();
+  }
+
+  Future<void> removeAlias(String original) async {
+    final db = await database;
+    await db.delete('exercise_aliases', where: 'original_name = ?', whereArgs: [original]);
+    notifyListeners();
+  }
+
+  Future<Map<String, String>> getAliases() async {
+    final db = await database;
+    final res = await db.query('exercise_aliases');
+    final Map<String, String> map = {};
+    for (var row in res) {
+      map[row['original_name'] as String] = row['alias'] as String;
+    }
+    return map;
   }
 
   // ==========================================
@@ -101,7 +140,7 @@ class DatabaseService extends ChangeNotifier {
   }
 
   // ==========================================
-  //              ANALYTICS (RESTORED)
+  //              ANALYTICS
   // ==========================================
   Future<List<LogEntry>> getLogsInDateRange(DateTime start, DateTime end) async {
     final db = await database;

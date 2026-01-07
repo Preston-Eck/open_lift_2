@@ -40,10 +40,13 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
   int _restSeconds = 0;
   bool _isResting = false;
 
+  Map<String, String> _aliases = {}; // Cache aliases
+
   @override
   void initState() {
     super.initState();
     _initSession();
+    _loadAliases();
   }
 
   Future<void> _initSession() async {
@@ -64,6 +67,14 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
       _startSessionTimer();
     } catch (e, stack) {
       LoggerService().log("Session Init Error", e, stack);
+    }
+  }
+
+  Future<void> _loadAliases() async {
+    final db = context.read<DatabaseService>();
+    final aliases = await db.getAliases();
+    if (mounted) {
+      setState(() => _aliases = aliases);
     }
   }
 
@@ -161,6 +172,7 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
               key: ValueKey("${exercises[i].name}_$i"),
               exercise: exercises[i],
               sessionId: _sessionId,
+              alias: _aliases[exercises[i].name], // Pass alias
               onSetCompleted: (restTime) => _triggerRest(restTime),
             ),
           ),
@@ -191,12 +203,14 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
 class ExerciseCard extends StatefulWidget {
   final WorkoutExercise exercise;
   final String sessionId;
+  final String? alias; // NEW
   final Function(int) onSetCompleted;
 
   const ExerciseCard({
     super.key, 
     required this.exercise, 
     required this.sessionId,
+    this.alias, // NEW
     required this.onSetCompleted,
   });
 
@@ -225,9 +239,9 @@ class _ExerciseCardState extends State<ExerciseCard> {
 
   @override
   void dispose() {
-    for (var c in _weightCtrls) c.dispose();
-    for (var c in _repsCtrls) c.dispose();
-    for (var c in _timeCtrls) c.dispose();
+    for (var c in _weightCtrls) { c.dispose(); }
+    for (var c in _repsCtrls) { c.dispose(); }
+    for (var c in _timeCtrls) { c.dispose(); }
     _localTimer?.cancel();
     super.dispose();
   }
@@ -286,10 +300,9 @@ class _ExerciseCardState extends State<ExerciseCard> {
     return "$m:$s";
   }
 
-  Future<void> _showDetails(BuildContext context, String name) async {
+  Future<void> _showDetails(String name) async {
     final connectivity = await Connectivity().checkConnectivity();
     
-    // Check mounted before using context
     if (!mounted) return;
 
     if (connectivity == ConnectivityResult.none) {
@@ -305,7 +318,6 @@ class _ExerciseCardState extends State<ExerciseCard> {
           .limit(1)
           .maybeSingle();
       
-      // Check mounted again after async await
       if (!mounted) return;
 
       if (data != null) {
@@ -326,8 +338,11 @@ class _ExerciseCardState extends State<ExerciseCard> {
         children: [
           // Header
           ListTile(
-            title: Text(widget.exercise.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: Text("${widget.exercise.sets} Sets • Target: ${widget.exercise.reps} reps"),
+            // UPDATED: Show alias if available
+            title: Text(widget.alias ?? widget.exercise.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+            subtitle: Text(
+              "${widget.exercise.sets} Sets • ${widget.exercise.reps} reps${widget.alias != null ? ' (${widget.exercise.name})' : ''}"
+            ),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -341,7 +356,7 @@ class _ExerciseCardState extends State<ExerciseCard> {
                 ),
                 IconButton(
                   icon: const Icon(Icons.info_outline, color: Colors.blueGrey),
-                  onPressed: () => _showDetails(context, widget.exercise.name),
+                  onPressed: () => _showDetails(widget.exercise.name),
                 ),
               ],
             ),

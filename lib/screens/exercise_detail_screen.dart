@@ -24,6 +24,72 @@ class _ExerciseDetailScreenState extends State<ExerciseDetailScreen> {
   static const Color clarityCream = Color(0xFFF8F9FA);
   static const Color textDark = Color(0xFF264653);
 
+  String? _currentAlias;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAlias();
+  }
+
+  Future<void> _loadAlias() async {
+    final db = context.read<DatabaseService>();
+    final aliases = await db.getAliases();
+    if (mounted) {
+      setState(() {
+        _currentAlias = aliases[widget.exercise.name];
+      });
+    }
+  }
+
+  void _showRenameDialog() {
+    final controller = TextEditingController(text: _currentAlias ?? widget.exercise.name);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Rename Exercise"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text("Set a local nickname for this exercise. The original name will still be used for tracking."),
+            const SizedBox(height: 10),
+            TextField(
+              controller: controller,
+              decoration: const InputDecoration(labelText: "Nickname", border: OutlineInputBorder()),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              // Reset to original
+              await context.read<DatabaseService>().removeAlias(widget.exercise.name);
+              
+              // Safety check for State before calling internal method
+              if (!mounted) return;
+              await _loadAlias();
+              
+              // Safety check for Dialog Context before popping
+              if (ctx.mounted) Navigator.pop(ctx);
+            },
+            child: const Text("Reset Default", style: TextStyle(color: Colors.red)),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              await context.read<DatabaseService>().setExerciseAlias(widget.exercise.name, controller.text);
+              
+              if (!mounted) return;
+              await _loadAlias();
+              
+              if (ctx.mounted) Navigator.pop(ctx);
+            },
+            child: const Text("Save"),
+          ),
+        ],
+      ),
+    );
+  }
+
   String _getImageUrl(String path) {
     if (path.startsWith('http')) return path;
     
@@ -40,16 +106,37 @@ class _ExerciseDetailScreenState extends State<ExerciseDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Determine display name
+    final displayName = _currentAlias ?? widget.exercise.name;
+    final isAliased = _currentAlias != null && _currentAlias != widget.exercise.name;
+
     return Scaffold(
       backgroundColor: clarityCream,
       appBar: AppBar(
-        title: Text(
-          widget.exercise.name,
-          style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: Colors.white),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              displayName,
+              style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: Colors.white, fontSize: 18),
+            ),
+            if (isAliased)
+              Text(
+                widget.exercise.name,
+                style: GoogleFonts.inter(color: Colors.white70, fontSize: 12),
+              ),
+          ],
         ),
         backgroundColor: renewalTeal,
         iconTheme: const IconThemeData(color: Colors.white),
         elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.edit),
+            onPressed: _showRenameDialog,
+            tooltip: "Rename Exercise",
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         child: Column(
