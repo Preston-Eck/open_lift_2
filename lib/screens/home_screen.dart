@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
 import '../services/database_service.dart';
+import '../services/sync_service.dart'; // ✅ ADDED THIS IMPORT
 import 'equipment_manager_screen.dart';
 import 'plan_generator_screen.dart';
 import 'saved_plans_screen.dart';
@@ -13,7 +14,7 @@ import 'settings_screen.dart';
 import 'wiki_screen.dart';
 import 'exercise_analytics_screen.dart';
 import 'global_search_screen.dart';
-import 'social_dashboard_screen.dart'; // NEW IMPORT
+import 'social_dashboard_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -27,6 +28,14 @@ class HomeScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text("Dashboard"),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.cloud_sync),
+            onPressed: () {
+              final sync = Provider.of<SyncService>(context, listen: false);
+              sync.syncAll();
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Sync Started...")));
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.search),
             onPressed: () {

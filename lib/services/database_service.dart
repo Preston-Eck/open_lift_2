@@ -22,7 +22,7 @@ class DatabaseService extends ChangeNotifier {
 
     return await openDatabase(
       path,
-      version: 10, // UPDATED: Version 10
+      version: 11, // UPDATED: Version 11
       onCreate: (db, version) async {
         await _createTables(db);
       },
@@ -45,9 +45,17 @@ class DatabaseService extends ChangeNotifier {
             debugPrint("Migration Note: $e");
           }
         }
-        // NEW: Schema v10 - Aliases
         if (oldVersion < 10) {
           await db.execute('CREATE TABLE exercise_aliases (original_name TEXT PRIMARY KEY, alias TEXT)');
+        }
+        // NEW: Schema v11 - Sync Columns
+        if (oldVersion < 11) {
+          try {
+            await db.execute('ALTER TABLE workout_plans ADD COLUMN last_updated TEXT');
+            await db.execute('ALTER TABLE workout_logs ADD COLUMN last_updated TEXT');
+          } catch (e) {
+            debugPrint("v11 Migration (Sync Columns) Error (Ignorable if exists): $e");
+          }
         }
       }
     );
@@ -55,14 +63,15 @@ class DatabaseService extends ChangeNotifier {
 
   Future<void> _createTables(Database db) async {
     await db.execute('CREATE TABLE user_equipment (id TEXT PRIMARY KEY, name TEXT, is_owned INTEGER)');
-    await db.execute('CREATE TABLE workout_logs (id TEXT PRIMARY KEY, exercise_id TEXT, exercise_name TEXT, weight REAL, reps INTEGER, volume_load REAL, duration INTEGER, timestamp TEXT, session_id TEXT)');
-    await db.execute('CREATE TABLE workout_plans (id TEXT PRIMARY KEY, name TEXT, goal TEXT, type TEXT, schedule_json TEXT)');
+    // v11: Added last_updated
+    await db.execute('CREATE TABLE workout_logs (id TEXT PRIMARY KEY, exercise_id TEXT, exercise_name TEXT, weight REAL, reps INTEGER, volume_load REAL, duration INTEGER, timestamp TEXT, session_id TEXT, last_updated TEXT)');
+    // v11: Added last_updated
+    await db.execute('CREATE TABLE workout_plans (id TEXT PRIMARY KEY, name TEXT, goal TEXT, type TEXT, schedule_json TEXT, last_updated TEXT)');
     await db.execute('CREATE TABLE exercise_stats (exercise_name TEXT PRIMARY KEY, one_rep_max REAL, last_updated TEXT)');
     await db.execute('CREATE TABLE body_metrics (id TEXT PRIMARY KEY, date TEXT, weight REAL, measurements_json TEXT)');
     await db.execute('CREATE TABLE one_rep_max_history (id TEXT PRIMARY KEY, exercise_name TEXT, weight REAL, date TEXT)');
     await db.execute('CREATE TABLE custom_exercises (id TEXT PRIMARY KEY, name TEXT, category TEXT, primary_muscles TEXT, notes TEXT)');
     await db.execute('CREATE TABLE workout_sessions (id TEXT PRIMARY KEY, plan_id TEXT, day_name TEXT, start_time TEXT, end_time TEXT, note TEXT)');
-    // v10
     await db.execute('CREATE TABLE exercise_aliases (original_name TEXT PRIMARY KEY, alias TEXT)');
   }
 
@@ -80,7 +89,7 @@ class DatabaseService extends ChangeNotifier {
   }
 
   // ==========================================
-  //                ALIASES (NEW)
+  //                ALIASES
   // ==========================================
   Future<void> setExerciseAlias(String original, String alias) async {
     final db = await database;
@@ -195,9 +204,25 @@ class DatabaseService extends ChangeNotifier {
   // ==========================================
   //              CORE FEATURES
   // ==========================================
-  Future<void> logSet(LogEntry entry) async { final db = await database; await db.insert('workout_logs', entry.toMap()); notifyListeners(); }
+  Future<void> logSet(LogEntry entry) async {
+    final db = await database;
+    // Update 'last_updated' for Sync
+    final map = entry.toMap();
+    map['last_updated'] = DateTime.now().toIso8601String();
+    await db.insert('workout_logs', map);
+    notifyListeners();
+  }
+
   Future<List<LogEntry>> getHistory() async { final db = await database; final res = await db.query('workout_logs', orderBy: 'timestamp DESC'); return res.map((e) => LogEntry.fromMap(e)).toList(); }
-  Future<void> savePlan(WorkoutPlan plan) async { final db = await database; await db.insert('workout_plans', plan.toMap(), conflictAlgorithm: ConflictAlgorithm.replace); notifyListeners(); }
+  
+  Future<void> savePlan(WorkoutPlan plan) async {
+    final db = await database;
+    final map = plan.toMap();
+    map['last_updated'] = DateTime.now().toIso8601String();
+    await db.insert('workout_plans', map, conflictAlgorithm: ConflictAlgorithm.replace);
+    notifyListeners();
+  }
+
   Future<List<WorkoutPlan>> getPlans() async { final db = await database; final res = await db.query('workout_plans'); return res.map((e) => WorkoutPlan.fromMap(e)).toList(); }
   Future<void> deletePlan(String id) async { final db = await database; await db.delete('workout_plans', where: 'id = ?', whereArgs: [id]); notifyListeners(); }
   Future<void> updateEquipment(String name, bool isOwned) async { final db = await database; await db.insert('user_equipment', {'id': name, 'name': name, 'is_owned': isOwned ? 1 : 0}, conflictAlgorithm: ConflictAlgorithm.replace); notifyListeners(); }
@@ -226,5 +251,38 @@ class DatabaseService extends ChangeNotifier {
     final Map<String, LogEntry> latest = {};
     for (var log in allLogs) { if (!latest.containsKey(log.exerciseName)) latest[log.exerciseName] = log; }
     return latest.values.toList();
+  }
+
+  // ==========================================
+  //                SYNC HELPERS (NEW)
+  // ==========================================
+  Future<List<Map<String, dynamic>>> getAllPlansRaw() async {
+    final db = await database;
+    return await db.query('workout_plans');
+  }
+
+  Future<List<Map<String, dynamic>>> getAllLogsRaw() async {
+    final db = await database;
+    return await db.query('workout_logs');
+  }
+
+  Future<void> bulkInsertPlans(List<Map<String, dynamic>> plans) async {
+    final db = await database;
+    final batch = db.batch();
+    for (var p in plans) {
+      batch.insert('workout_plans', p, conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+    await batch.commit(noResult: true);
+    notifyListeners();
+  }
+
+  Future<void> bulkInsertLogs(List<Map<String, dynamic>> logs) async {
+    final db = await database;
+    final batch = db.batch();
+    for (var l in logs) {
+      batch.insert('workout_logs', l, conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+    await batch.commit(noResult: true);
+    notifyListeners();
   }
 }
