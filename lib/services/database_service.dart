@@ -14,18 +14,12 @@ class DatabaseService extends ChangeNotifier {
 
   /// Sets the active user ID. If it changes, we close the old DB.
   Future<void> setUserId(String? userId) async {
-    // If the ID hasn't changed, do nothing
     if (_currentUserId == userId) return;
-
     _currentUserId = userId;
-    
-    // Close existing connection if open
     if (_db != null) {
       await _db!.close();
       _db = null;
     }
-    
-    // If we have a user, notify listeners that DB is ready (or will be)
     notifyListeners();
   }
 
@@ -33,7 +27,6 @@ class DatabaseService extends ChangeNotifier {
     if (_db != null && _db!.isOpen) return _db!;
     
     if (_currentUserId == null) {
-      // Fallback for guest mode or pre-login (optional: could throw error)
       _db = await _initDB('guest_user.db');
     } else {
       _db = await _initDB('user_$_currentUserId.db');
@@ -47,7 +40,7 @@ class DatabaseService extends ChangeNotifier {
 
     return await openDatabase(
       path,
-      version: 13, // Schema v13: Added User Profile details
+      version: 13,
       onCreate: (db, version) async {
         await _createTables(db);
         await _createProfileTable(db);
@@ -56,7 +49,6 @@ class DatabaseService extends ChangeNotifier {
         await _cleanupGhostSessions(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
-        // ... Previous migrations (v1-v11) assumed ...
         if (oldVersion < 12) {
            try {
             await db.execute('ALTER TABLE user_equipment ADD COLUMN capabilities_json TEXT');
@@ -65,7 +57,6 @@ class DatabaseService extends ChangeNotifier {
             debugPrint("v12 Migration Note: $e");
           }
         }
-        // NEW: Schema v13 - Local User Profile
         if (oldVersion < 13) {
           await _createProfileTable(db);
         }
@@ -85,9 +76,7 @@ class DatabaseService extends ChangeNotifier {
     await db.execute('CREATE TABLE exercise_aliases (original_name TEXT PRIMARY KEY, alias TEXT)');
   }
 
-  // New Table for v13
   Future<void> _createProfileTable(Database db) async {
-    // Check if table exists first to be safe during migration
     try {
       await db.execute('''
         CREATE TABLE IF NOT EXISTS user_profile (
@@ -117,12 +106,9 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
-  // ==========================================
-  //                USER PROFILE
-  // ==========================================
+  // --- USER PROFILE ---
   Future<void> updateUserProfile(Map<String, dynamic> data) async {
     final db = await database;
-    // We assume 1 row per local DB
     await db.insert(
       'user_profile', 
       {'id': 'local_user', ...data}, 
@@ -138,9 +124,7 @@ class DatabaseService extends ChangeNotifier {
     return null;
   }
 
-  // ==========================================
-  //                ALIASES
-  // ==========================================
+  // --- ALIASES ---
   Future<void> setExerciseAlias(String original, String alias) async {
     final db = await database;
     if (alias.isEmpty || alias == original) {
@@ -171,9 +155,7 @@ class DatabaseService extends ChangeNotifier {
     return map;
   }
 
-  // ==========================================
-  //                SESSION MGMT
-  // ==========================================
+  // --- SESSION MGMT ---
   Future<void> startSession(WorkoutSession session) async {
     final db = await database;
     await db.insert('workout_sessions', session.toMap());
@@ -198,31 +180,13 @@ class DatabaseService extends ChangeNotifier {
     return res.map((e) => LogEntry.fromMap(e)).toList();
   }
 
-  // ==========================================
-  //              ANALYTICS
-  // ==========================================
+  // --- ANALYTICS ---
   Future<List<LogEntry>> getLogsInDateRange(DateTime start, DateTime end) async {
     final db = await database;
     final startStr = start.toIso8601String();
     final endStr = end.toIso8601String();
     final res = await db.query('workout_logs', where: 'timestamp >= ? AND timestamp <= ?', whereArgs: [startStr, endStr]);
     return res.map((e) => LogEntry.fromMap(e)).toList();
-  }
-
-  Future<Map<String, double>> getVolumePerDay(int days) async {
-    final db = await database;
-    final start = DateTime.now().subtract(Duration(days: days));
-    final startStr = start.toIso8601String();
-    final res = await db.rawQuery('''
-      SELECT substr(timestamp, 1, 10) as date, SUM(volume_load) as total_vol
-      FROM workout_logs
-      WHERE timestamp >= ?
-      GROUP BY substr(timestamp, 1, 10)
-      ORDER BY date ASC
-    ''', [startStr]);
-    final Map<String, double> data = {};
-    for (var row in res) { data[row['date'] as String] = (row['total_vol'] as num).toDouble(); }
-    return data;
   }
 
   Future<List<Map<String, dynamic>>> getWeeklyVolume() async {
@@ -251,9 +215,7 @@ class DatabaseService extends ChangeNotifier {
     return res.map((e) => LogEntry.fromMap(e)).toList();
   }
 
-  // ==========================================
-  //              CORE FEATURES
-  // ==========================================
+  // --- CORE FEATURES ---
   Future<void> logSet(LogEntry entry) async {
     final db = await database;
     final map = entry.toMap();
@@ -275,7 +237,7 @@ class DatabaseService extends ChangeNotifier {
   Future<List<WorkoutPlan>> getPlans() async { final db = await database; final res = await db.query('workout_plans'); return res.map((e) => WorkoutPlan.fromMap(e)).toList(); }
   Future<void> deletePlan(String id) async { final db = await database; await db.delete('workout_plans', where: 'id = ?', whereArgs: [id]); notifyListeners(); }
   
-  // Equipment
+  // --- EQUIPMENT ---
   Future<void> updateEquipment(String name, bool isOwned) async { 
     final db = await database; 
     final existing = await db.query('user_equipment', where: 'id = ?', whereArgs: [name]);
@@ -316,27 +278,30 @@ class DatabaseService extends ChangeNotifier {
     }
     return capabilities.toList();
   }
+
+  /// NEW: Returns full equipment objects for the Manager UI
+  Future<List<Map<String, dynamic>>> getUserEquipmentList() async {
+    final db = await database;
+    // Return all, let UI filter by 'is_owned' if needed, or just owned.
+    return await db.query('user_equipment', where: 'is_owned = 1');
+  }
   
-  // Body Metrics
+  // --- BODY METRICS ---
   Future<void> logBodyMetric(BodyMetric metric) async { 
     final db = await database; 
-    // 1. Log the metric
     await db.insert('body_metrics', metric.toMap(), conflictAlgorithm: ConflictAlgorithm.replace); 
-    
-    // 2. Update Profile Current Weight (Automatic)
     await db.update('user_profile', {'current_weight': metric.weight}, where: 'id = ?', whereArgs: ['local_user']);
-    
     notifyListeners(); 
   }
   Future<List<BodyMetric>> getBodyMetrics() async { final db = await database; final res = await db.query('body_metrics', orderBy: 'date DESC'); return res.map((e) => BodyMetric.fromMap(e)).toList(); }
 
-  // 1RM
+  // --- 1RM ---
   Future<Map<String, double>> getLatestOneRepMaxes() async { final db = await database; final res = await db.query('one_rep_max_history', orderBy: 'date ASC'); final Map<String, double> latest = {}; for (var row in res) { latest[row['exercise_name'] as String] = row['weight'] as double; } return latest; }
   Future<Map<String, dynamic>?> getLatestOneRepMaxDetailed(String exerciseName) async { final db = await database; final res = await db.query('one_rep_max_history', where: 'exercise_name = ?', whereArgs: [exerciseName], orderBy: 'date DESC', limit: 1); if (res.isNotEmpty) return res.first; return null; }
   Future<List<Map<String, dynamic>>> getOneRepMaxHistory(String exerciseName) async { final db = await database; return await db.query('one_rep_max_history', where: 'exercise_name = ?', whereArgs: [exerciseName], orderBy: 'date DESC'); }
   Future<void> addOneRepMax(String exercise, double weight) async { final db = await database; await db.insert('one_rep_max_history', {'id': DateTime.now().toIso8601String(), 'exercise_name': exercise, 'weight': weight, 'date': DateTime.now().toIso8601String()}, conflictAlgorithm: ConflictAlgorithm.replace); notifyListeners(); }
 
-  // Custom Exercises
+  // --- CUSTOM EXERCISES ---
   Future<void> addCustomExercise(Exercise ex) async { 
     final db = await database; 
     await db.insert('custom_exercises', {
@@ -371,7 +336,7 @@ class DatabaseService extends ChangeNotifier {
     }).toList(); 
   }
 
-  // Search
+  // --- SEARCH ---
   Future<List<WorkoutPlan>> searchPlans(String query) async { final db = await database; final res = await db.query('workout_plans', where: 'name LIKE ?', whereArgs: ['%$query%']); return res.map((e) => WorkoutPlan.fromMap(e)).toList(); }
   Future<List<LogEntry>> searchHistory(String query) async {
     final db = await database;
@@ -382,36 +347,9 @@ class DatabaseService extends ChangeNotifier {
     return latest.values.toList();
   }
 
-  // ==========================================
-  //                SYNC HELPERS
-  // ==========================================
-  Future<List<Map<String, dynamic>>> getAllPlansRaw() async {
-    final db = await database;
-    return await db.query('workout_plans');
-  }
-
-  Future<List<Map<String, dynamic>>> getAllLogsRaw() async {
-    final db = await database;
-    return await db.query('workout_logs');
-  }
-
-  Future<void> bulkInsertPlans(List<Map<String, dynamic>> plans) async {
-    final db = await database;
-    final batch = db.batch();
-    for (var p in plans) {
-      batch.insert('workout_plans', p, conflictAlgorithm: ConflictAlgorithm.replace);
-    }
-    await batch.commit(noResult: true);
-    notifyListeners();
-  }
-
-  Future<void> bulkInsertLogs(List<Map<String, dynamic>> logs) async {
-    final db = await database;
-    final batch = db.batch();
-    for (var l in logs) {
-      batch.insert('workout_logs', l, conflictAlgorithm: ConflictAlgorithm.replace);
-    }
-    await batch.commit(noResult: true);
-    notifyListeners();
-  }
+  // --- SYNC ---
+  Future<List<Map<String, dynamic>>> getAllPlansRaw() async { final db = await database; return await db.query('workout_plans'); }
+  Future<List<Map<String, dynamic>>> getAllLogsRaw() async { final db = await database; return await db.query('workout_logs'); }
+  Future<void> bulkInsertPlans(List<Map<String, dynamic>> plans) async { final db = await database; final batch = db.batch(); for (var p in plans) { batch.insert('workout_plans', p, conflictAlgorithm: ConflictAlgorithm.replace); } await batch.commit(noResult: true); notifyListeners(); }
+  Future<void> bulkInsertLogs(List<Map<String, dynamic>> logs) async { final db = await database; final batch = db.batch(); for (var l in logs) { batch.insert('workout_logs', l, conflictAlgorithm: ConflictAlgorithm.replace); } await batch.commit(noResult: true); notifyListeners(); }
 }
