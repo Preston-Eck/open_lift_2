@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
 import '../services/database_service.dart';
 import '../services/sync_service.dart';
-import '../services/logger_service.dart'; // NEW: For explicit logging
+import '../services/logger_service.dart';
 import 'equipment_manager_screen.dart';
 import 'plan_generator_screen.dart';
 import 'saved_plans_screen.dart';
@@ -16,6 +16,7 @@ import 'wiki_screen.dart';
 import 'exercise_analytics_screen.dart';
 import 'global_search_screen.dart';
 import 'social_dashboard_screen.dart';
+import 'exercise_auditor_screen.dart'; // ✅ FIXED: Added missing import
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -46,7 +47,6 @@ class HomeScreen extends StatelessWidget {
             icon: const Icon(Icons.settings),
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
           ),
-          // Changed icon to generic person to avoid "Sign Out" confusion
           IconButton(
             icon: Icon(auth.isAuthenticated ? Icons.logout : Icons.person),
             tooltip: auth.isAuthenticated ? "Sign Out" : "Sign In",
@@ -99,6 +99,7 @@ class HomeScreen extends StatelessWidget {
             ),
             const SizedBox(height: 20),
 
+            // Consolidated Equipment Section with Auditor Button
             _buildEquipmentList(context, db),
             const SizedBox(height: 20),
             
@@ -217,10 +218,22 @@ class HomeScreen extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             const Text("My Equipment", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            TextButton.icon(
-              icon: const Icon(Icons.edit),
-              label: const Text("Manage"),
-              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EquipmentManagerScreen())),
+            // ✅ FIXED: Consolidated Auditor and Manage buttons here
+            Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.fact_check, color: Colors.deepPurple),
+                  tooltip: "Audit Database",
+                  onPressed: () {
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const ExerciseAuditorScreen()));
+                  },
+                ),
+                TextButton.icon(
+                  icon: const Icon(Icons.edit),
+                  label: const Text("Manage"),
+                  onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EquipmentManagerScreen())),
+                ),
+              ],
             ),
           ],
         ),
@@ -249,14 +262,12 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  // UPDATED: Combined Auth Dialog with Toggle & Validation
   void _showAuthDialog(BuildContext context) {
     final emailController = TextEditingController();
     final passController = TextEditingController();
-    final confirmPassController = TextEditingController(); // NEW
+    final confirmPassController = TextEditingController(); 
     final userController = TextEditingController(); 
     
-    // We use a StatefulBuilder to handle the local state (Login vs Signup mode) inside the dialog
     showDialog(
       context: context,
       builder: (ctx) {
@@ -314,7 +325,6 @@ class HomeScreen extends StatelessWidget {
 
                       try {
                         if (isSignup) {
-                          // Validation
                           if (passController.text != confirmPassController.text) {
                             throw Exception("Passwords do not match.");
                           }
@@ -332,7 +342,6 @@ class HomeScreen extends StatelessWidget {
                         
                         if (ctx.mounted) Navigator.pop(ctx);
                       } catch (e, stack) {
-                        // LOG THE ERROR EXPLICITLY
                         LoggerService().log("Auth Error (${isSignup ? 'SignUp' : 'Login'})", e, stack);
                         
                         if (ctx.mounted) {

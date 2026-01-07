@@ -128,4 +128,40 @@ class GeminiService {
       return ["Bodyweight"];
     }
   }
+  /// Suggests exercises for a specific piece of equipment (Tag)
+  /// excluding ones the user already has.
+  Future<List<Map<String, dynamic>>> suggestMissingExercises(
+    String equipmentTag, 
+    List<String> existingExerciseNames
+  ) async {
+    final prompt = '''
+      The user owns equipment with the capability: "$equipmentTag".
+      They already have these exercises in their database: ${existingExerciseNames.take(50).join(', ')}.
+
+      Suggest 3-5 standard, effective exercises that use a "$equipmentTag" but are NOT in the list above.
+      
+      Return ONLY valid JSON with this structure:
+      [
+        {
+          "name": "Exercise Name",
+          "primary_muscles": ["Chest", "Triceps"],
+          "instructions": ["Step 1...", "Step 2..."]
+        }
+      ]
+    ''';
+
+    try {
+      final content = [Content.text(prompt)];
+      final response = await _model.generateContent(content);
+      
+      final String rawJson = response.text ?? "[]";
+      final cleanJson = rawJson.replaceAll('```json', '').replaceAll('```', '').trim();
+      
+      final List<dynamic> parsed = jsonDecode(cleanJson);
+      return List<Map<String, dynamic>>.from(parsed);
+    } catch (e) {
+      debugPrint("Gemini Suggestion Error: $e");
+      return [];
+    }
+  }
 }
