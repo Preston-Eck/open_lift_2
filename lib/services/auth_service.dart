@@ -43,15 +43,17 @@ class AuthService extends ChangeNotifier {
 
   /// Sign up and create a basic profile
   Future<void> signUp(String email, String password, String username) async {
-    final response = await _supabase.auth.signUp(email: email, password: password);
+    // We pass 'data' so the SQL Trigger can extract the username
+    final response = await _supabase.auth.signUp(
+      email: email, 
+      password: password,
+      data: {'username': username}, 
+    );
+    
+    // If auto-confirm is off, user is null/not-logged-in here, which is fine.
+    // The DB Trigger handles the profile creation in the background.
     
     if (response.user != null) {
-      // Create Profile Row
-      await _supabase.from('profiles').insert({
-        'id': response.user!.id,
-        'username': username,
-        'display_name': username, // Default to username
-      });
       await _loadProfile();
     }
   }

@@ -7,9 +7,10 @@ import 'services/database_service.dart';
 import 'services/gemini_service.dart';
 import 'services/logger_service.dart';
 import 'services/auth_service.dart';
-import 'services/sync_service.dart'; // NEW
+import 'services/sync_service.dart'; 
 import 'theme.dart';
-import 'screens/home_screen.dart'; // Changed to HomeScreen to match flow
+import 'screens/home_screen.dart'; 
+import 'services/social_service.dart';
 
 Future<void> main() async {
   runZonedGuarded(() async {
@@ -38,9 +39,12 @@ Future<void> main() async {
           ChangeNotifierProvider(create: (_) => DatabaseService()),
           ChangeNotifierProvider(create: (_) => AuthService()),
           Provider(create: (_) => GeminiService()),
-          // NEW: SyncService (Dependent on DB and Auth)
+          // SyncService (Dependent on DB and Auth)
           ProxyProvider2<DatabaseService, AuthService, SyncService>(
             update: (_, db, auth, __) => SyncService(db, auth),
+          ),
+          ProxyProvider<AuthService, SocialService>(
+            update: (_, auth, __) => SocialService(auth),
           ),
         ],
         child: const MyApp(),
