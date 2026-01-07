@@ -17,7 +17,7 @@ dependencies:
   supabase_flutter: ^2.0.0
   sqflite: ^2.3.0
   path: ^1.8.3
-  sqflite_common_ffi: ^2.3.0
+  sqflite_common_ffi: ^2.4.0+2
   
 # UI Components
   google_fonts: ^6.1.0

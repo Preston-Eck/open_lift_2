@@ -1,21 +1,30 @@
 import 'dart:async';
+import 'dart:io'; // ✅ NEW: For Platform check
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart'; // ✅ NEW: For Windows DB
+
 import 'services/database_service.dart';
 import 'services/gemini_service.dart';
 import 'services/logger_service.dart';
 import 'services/auth_service.dart';
 import 'services/sync_service.dart'; 
+import 'services/social_service.dart'; // Ensure this is imported
 import 'theme.dart';
 import 'screens/home_screen.dart'; 
-import 'services/social_service.dart';
 
 Future<void> main() async {
   runZonedGuarded(() async {
     WidgetsFlutterBinding.ensureInitialized();
     await LoggerService().init();
+
+    // ✅ NEW: Initialize Database for Windows/Desktop
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
+    }
 
     try {
       await dotenv.load(fileName: ".env");
@@ -64,24 +73,11 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   @override
-  void initState() {
-    super.initState();
-    // Trigger Sync after build
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        // We can't access Provider here easily without context in build, 
-        // so usually we do this in the first screen or a splash screen.
-        // For simplicity, HomeScreen will trigger it.
-      }
-    });
-  }
-
-  @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'OpenLift 2.0',
       theme: AppTheme.lightTheme,
-      home: const HomeScreen(), // Ensure we point to the main dashboard container
+      home: const HomeScreen(), 
       debugShowCheckedModeBanner: false,
     );
   }

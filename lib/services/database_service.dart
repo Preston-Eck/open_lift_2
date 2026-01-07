@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
+import 'dart:convert'; // For JSON encoding/decoding
 import '../models/log.dart';
 import '../models/plan.dart'; 
 import '../models/body_metric.dart';
@@ -22,7 +23,7 @@ class DatabaseService extends ChangeNotifier {
 
     return await openDatabase(
       path,
-      version: 11, // UPDATED: Version 11
+      version: 12, // Schema v12
       onCreate: (db, version) async {
         await _createTables(db);
       },
@@ -48,13 +49,21 @@ class DatabaseService extends ChangeNotifier {
         if (oldVersion < 10) {
           await db.execute('CREATE TABLE exercise_aliases (original_name TEXT PRIMARY KEY, alias TEXT)');
         }
-        // NEW: Schema v11 - Sync Columns
         if (oldVersion < 11) {
           try {
             await db.execute('ALTER TABLE workout_plans ADD COLUMN last_updated TEXT');
             await db.execute('ALTER TABLE workout_logs ADD COLUMN last_updated TEXT');
           } catch (e) {
-            debugPrint("v11 Migration (Sync Columns) Error (Ignorable if exists): $e");
+            debugPrint("v11 Migration Note: $e");
+          }
+        }
+        // NEW: Schema v12 - Intelligent Gym
+        if (oldVersion < 12) {
+          try {
+            await db.execute('ALTER TABLE user_equipment ADD COLUMN capabilities_json TEXT');
+            await db.execute('ALTER TABLE custom_exercises ADD COLUMN equipment_json TEXT');
+          } catch (e) {
+            debugPrint("v12 Migration Note: $e");
           }
         }
       }
@@ -62,15 +71,13 @@ class DatabaseService extends ChangeNotifier {
   }
 
   Future<void> _createTables(Database db) async {
-    await db.execute('CREATE TABLE user_equipment (id TEXT PRIMARY KEY, name TEXT, is_owned INTEGER)');
-    // v11: Added last_updated
+    await db.execute('CREATE TABLE user_equipment (id TEXT PRIMARY KEY, name TEXT, is_owned INTEGER, capabilities_json TEXT)');
     await db.execute('CREATE TABLE workout_logs (id TEXT PRIMARY KEY, exercise_id TEXT, exercise_name TEXT, weight REAL, reps INTEGER, volume_load REAL, duration INTEGER, timestamp TEXT, session_id TEXT, last_updated TEXT)');
-    // v11: Added last_updated
     await db.execute('CREATE TABLE workout_plans (id TEXT PRIMARY KEY, name TEXT, goal TEXT, type TEXT, schedule_json TEXT, last_updated TEXT)');
     await db.execute('CREATE TABLE exercise_stats (exercise_name TEXT PRIMARY KEY, one_rep_max REAL, last_updated TEXT)');
     await db.execute('CREATE TABLE body_metrics (id TEXT PRIMARY KEY, date TEXT, weight REAL, measurements_json TEXT)');
     await db.execute('CREATE TABLE one_rep_max_history (id TEXT PRIMARY KEY, exercise_name TEXT, weight REAL, date TEXT)');
-    await db.execute('CREATE TABLE custom_exercises (id TEXT PRIMARY KEY, name TEXT, category TEXT, primary_muscles TEXT, notes TEXT)');
+    await db.execute('CREATE TABLE custom_exercises (id TEXT PRIMARY KEY, name TEXT, category TEXT, primary_muscles TEXT, notes TEXT, equipment_json TEXT)');
     await db.execute('CREATE TABLE workout_sessions (id TEXT PRIMARY KEY, plan_id TEXT, day_name TEXT, start_time TEXT, end_time TEXT, note TEXT)');
     await db.execute('CREATE TABLE exercise_aliases (original_name TEXT PRIMARY KEY, alias TEXT)');
   }
@@ -206,7 +213,6 @@ class DatabaseService extends ChangeNotifier {
   // ==========================================
   Future<void> logSet(LogEntry entry) async {
     final db = await database;
-    // Update 'last_updated' for Sync
     final map = entry.toMap();
     map['last_updated'] = DateTime.now().toIso8601String();
     await db.insert('workout_logs', map);
@@ -225,8 +231,58 @@ class DatabaseService extends ChangeNotifier {
 
   Future<List<WorkoutPlan>> getPlans() async { final db = await database; final res = await db.query('workout_plans'); return res.map((e) => WorkoutPlan.fromMap(e)).toList(); }
   Future<void> deletePlan(String id) async { final db = await database; await db.delete('workout_plans', where: 'id = ?', whereArgs: [id]); notifyListeners(); }
-  Future<void> updateEquipment(String name, bool isOwned) async { final db = await database; await db.insert('user_equipment', {'id': name, 'name': name, 'is_owned': isOwned ? 1 : 0}, conflictAlgorithm: ConflictAlgorithm.replace); notifyListeners(); }
-  Future<List<String>> getOwnedEquipment() async { final db = await database; final res = await db.query('user_equipment', where: 'is_owned = 1'); return res.map((e) => e['name'] as String).toList(); }
+  
+  // Equipment
+  Future<void> updateEquipment(String name, bool isOwned) async { 
+    final db = await database; 
+    final existing = await db.query('user_equipment', where: 'id = ?', whereArgs: [name]);
+    
+    if (existing.isNotEmpty) {
+      await db.update('user_equipment', {'is_owned': isOwned ? 1 : 0}, where: 'id = ?', whereArgs: [name]);
+    } else {
+      await db.insert('user_equipment', {'id': name, 'name': name, 'is_owned': isOwned ? 1 : 0});
+    }
+    notifyListeners(); 
+  }
+
+  // NEW: Update capabilities for specific equipment (The "Brain" of Intelligent Gym)
+  Future<void> updateEquipmentCapabilities(String name, List<String> capabilities) async {
+    final db = await database;
+    await db.insert('user_equipment', {
+      'id': name,
+      'name': name,
+      'is_owned': 1,
+      'capabilities_json': jsonEncode(capabilities),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    notifyListeners();
+  }
+
+  /// Returns a deduplicated list of all CAPABILITIES (tags) from owned equipment.
+  /// Example: User owns "SincMill" (Cable, Bench) and "Dumbbells" (Dumbbell).
+  /// Returns: ["Cable", "Bench", "Dumbbell"]
+  Future<List<String>> getOwnedEquipment() async {
+    final db = await database;
+    final res = await db.query('user_equipment', where: 'is_owned = 1');
+    
+    final Set<String> capabilities = {};
+
+    for (var row in res) {
+      // 1. Always add the name itself
+      capabilities.add(row['name'] as String);
+
+      // 2. Parse and add the hidden capabilities
+      if (row['capabilities_json'] != null) {
+        try {
+          final List<dynamic> tags = jsonDecode(row['capabilities_json'] as String);
+          capabilities.addAll(tags.map((e) => e.toString()));
+        } catch (e) {
+          debugPrint("Error parsing capabilities for ${row['name']}: $e");
+        }
+      }
+    }
+    
+    return capabilities.toList();
+  }
   
   // Body Metrics
   Future<void> logBodyMetric(BodyMetric metric) async { final db = await database; await db.insert('body_metrics', metric.toMap(), conflictAlgorithm: ConflictAlgorithm.replace); notifyListeners(); }
@@ -239,8 +295,39 @@ class DatabaseService extends ChangeNotifier {
   Future<void> addOneRepMax(String exercise, double weight) async { final db = await database; await db.insert('one_rep_max_history', {'id': DateTime.now().toIso8601String(), 'exercise_name': exercise, 'weight': weight, 'date': DateTime.now().toIso8601String()}, conflictAlgorithm: ConflictAlgorithm.replace); notifyListeners(); }
 
   // Custom Exercises
-  Future<void> addCustomExercise(Exercise ex) async { final db = await database; await db.insert('custom_exercises', {'id': ex.id, 'name': ex.name, 'category': ex.category, 'primary_muscles': ex.primaryMuscles.join(','), 'notes': ex.instructions.join('\n')}); notifyListeners(); }
-  Future<List<Exercise>> getCustomExercises() async { final db = await database; final res = await db.query('custom_exercises'); return res.map((e) => Exercise(id: e['id'] as String, name: e['name'] as String, category: e['category'] as String?, primaryMuscles: (e['primary_muscles'] as String).split(','), secondaryMuscles: [], equipment: [], instructions: [(e['notes'] as String?) ?? ''], images: [])).toList(); }
+  Future<void> addCustomExercise(Exercise ex) async { 
+    final db = await database; 
+    await db.insert('custom_exercises', {
+      'id': ex.id, 
+      'name': ex.name, 
+      'category': ex.category, 
+      'primary_muscles': ex.primaryMuscles.join(','), 
+      'notes': ex.instructions.join('\n'),
+      'equipment_json': jsonEncode(ex.equipment) // NEW
+    }); 
+    notifyListeners(); 
+  }
+  
+  Future<List<Exercise>> getCustomExercises() async { 
+    final db = await database; 
+    final res = await db.query('custom_exercises'); 
+    return res.map((e) {
+      List<String> equipment = [];
+      if (e['equipment_json'] != null) {
+        equipment = List<String>.from(jsonDecode(e['equipment_json'] as String));
+      }
+      return Exercise(
+        id: e['id'] as String, 
+        name: e['name'] as String, 
+        category: e['category'] as String?, 
+        primaryMuscles: (e['primary_muscles'] as String).split(','), 
+        secondaryMuscles: [], 
+        equipment: equipment, 
+        instructions: [(e['notes'] as String?) ?? ''], 
+        images: []
+      );
+    }).toList(); 
+  }
 
   // Search
   Future<List<WorkoutPlan>> searchPlans(String query) async { final db = await database; final res = await db.query('workout_plans', where: 'name LIKE ?', whereArgs: ['%$query%']); return res.map((e) => WorkoutPlan.fromMap(e)).toList(); }
@@ -254,7 +341,7 @@ class DatabaseService extends ChangeNotifier {
   }
 
   // ==========================================
-  //                SYNC HELPERS (NEW)
+  //                SYNC HELPERS
   // ==========================================
   Future<List<Map<String, dynamic>>> getAllPlansRaw() async {
     final db = await database;
