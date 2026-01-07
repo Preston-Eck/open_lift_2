@@ -13,6 +13,7 @@ import 'settings_screen.dart';
 import 'wiki_screen.dart';
 import 'exercise_analytics_screen.dart';
 import 'global_search_screen.dart';
+import 'social_dashboard_screen.dart'; // NEW IMPORT
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -55,9 +56,28 @@ class HomeScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildWelcomeCard(auth.user?.email),
+            _buildWelcomeCard(auth.user?.email, auth.username),
             const SizedBox(height: 20),
             
+            // --- SOCIAL ENTRY POINT ---
+            if (auth.isAuthenticated) ...[
+              GestureDetector(
+                onTap: () {
+                   Navigator.push(context, MaterialPageRoute(builder: (_) => const SocialDashboardScreen()));
+                },
+                child: Card(
+                  color: Colors.deepPurple.withValues(alpha: 0.1),
+                  child: const ListTile(
+                    leading: Icon(Icons.public, color: Colors.deepPurple, size: 30),
+                    title: Text("Community & Friends", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple)),
+                    subtitle: Text("Find plans, view leaderboards, and connect"),
+                    trailing: Icon(Icons.arrow_forward_ios, size: 16, color: Colors.deepPurple),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+            ],
+
             GestureDetector(
               onTap: () {
                  Navigator.push(context, MaterialPageRoute(builder: (_) => const AnalyticsScreen()));
@@ -163,12 +183,12 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildWelcomeCard(String? email) {
+  Widget _buildWelcomeCard(String? email, String? username) {
     return Card(
       child: ListTile(
         leading: const Icon(Icons.account_circle, size: 40),
-        title: Text(email != null ? "Welcome back!" : "Welcome, Guest"),
-        subtitle: Text(email ?? "Sign in to sync your plans"),
+        title: Text(username != null ? "Hi, $username!" : (email != null ? "Welcome back!" : "Welcome, Guest")),
+        subtitle: Text(email ?? "Sign in to join the community"),
       ),
     );
   }
@@ -226,6 +246,7 @@ class HomeScreen extends StatelessWidget {
   void _showLoginDialog(BuildContext context) {
     final emailController = TextEditingController();
     final passController = TextEditingController();
+    final userController = TextEditingController(); // NEW: For Sign Up
     
     showDialog(
       context: context,
@@ -235,14 +256,22 @@ class HomeScreen extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(controller: emailController, decoration: const InputDecoration(labelText: "Email")),
+            const SizedBox(height: 8),
             TextField(controller: passController, decoration: const InputDecoration(labelText: "Password"), obscureText: true),
+            const SizedBox(height: 8),
+            TextField(controller: userController, decoration: const InputDecoration(labelText: "Username (Sign Up Only)")),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () async {
+              if (userController.text.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Username required for Sign Up")));
+                return;
+              }
               try {
-                await ctx.read<AuthService>().signUp(emailController.text, passController.text);
+                // UPDATED: Pass 3 arguments
+                await ctx.read<AuthService>().signUp(emailController.text, passController.text, userController.text);
                 if (ctx.mounted) Navigator.pop(ctx);
               } catch (e) {
                 if (context.mounted) {
