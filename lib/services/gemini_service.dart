@@ -84,7 +84,6 @@ class GeminiService {
     }
   }
 
-  /// NEW: Accepts contextInfo (Model #s, Descriptions, URLs) for deep analysis
   Future<List<String>> analyzeEquipment(String equipmentName, {String contextInfo = ""}) async {
     final prompt = '''
       You are an expert fitness equipment researcher. 
@@ -122,30 +121,37 @@ class GeminiService {
       return parsed.map((e) => e.toString()).toList();
     } catch (e) {
       debugPrint("Gemini Equipment Analysis Error: $e");
-      // Fallback
       if (equipmentName.toLowerCase().contains("dumbbell")) return ["Dumbbell"];
       if (equipmentName.toLowerCase().contains("barbell")) return ["Barbell"];
       return ["Bodyweight"];
     }
   }
+
   /// Suggests exercises for a specific piece of equipment (Tag)
   /// excluding ones the user already has.
   Future<List<Map<String, dynamic>>> suggestMissingExercises(
-    String equipmentTag, 
-    List<String> existingExerciseNames
+    String targetTag, 
+    List<String> existingExerciseNames,
+    List<String> fullInventory 
   ) async {
+    // ✅ INCREASED LIMIT: Changed from "5" to "20"
     final prompt = '''
-      The user owns equipment with the capability: "$equipmentTag".
-      They already have these exercises in their database: ${existingExerciseNames.take(50).join(', ')}.
-
-      Suggest 3-5 standard, effective exercises that use a "$equipmentTag" but are NOT in the list above.
+      The user explicitly owns the following equipment tags: ${fullInventory.join(', ')}.
+      
+      Task: Suggest 20 standard, effective exercises that utilize the "$targetTag" capability.
+      
+      CRITICAL CONSTRAINTS:
+      1. The exercise MUST use "$targetTag".
+      2. The exercise must NOT require any equipment NOT listed above.
+      3. Assume "Bodyweight" is always available.
+      4. Exclude these exercises already in the database: ${existingExerciseNames.take(50).join(', ')}.
       
       Return ONLY valid JSON with this structure:
       [
         {
           "name": "Exercise Name",
-          "primary_muscles": ["Chest", "Triceps"],
-          "instructions": ["Step 1...", "Step 2..."]
+          "primary_muscles": ["Muscle 1", "Muscle 2"],
+          "instructions": ["Step 1", "Step 2"]
         }
       ]
     ''';

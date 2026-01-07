@@ -45,13 +45,25 @@ Future<void> main() async {
     runApp(
       MultiProvider(
         providers: [
-          ChangeNotifierProvider(create: (_) => DatabaseService()),
           ChangeNotifierProvider(create: (_) => AuthService()),
           Provider(create: (_) => GeminiService()),
-          // SyncService (Dependent on DB and Auth)
+          
+          // 1. Database depends on Auth
+          ChangeNotifierProxyProvider<AuthService, DatabaseService>(
+            create: (_) => DatabaseService(),
+            update: (_, auth, db) {
+              // Whenever Auth changes, update the DB's user ID
+              db?.setUserId(auth.user?.id); 
+              return db!;
+            },
+          ),
+
+          // 2. Sync depends on DB and Auth
           ProxyProvider2<DatabaseService, AuthService, SyncService>(
             update: (_, db, auth, __) => SyncService(db, auth),
           ),
+          
+          // 3. Social depends on Auth
           ProxyProvider<AuthService, SocialService>(
             update: (_, auth, __) => SocialService(auth),
           ),

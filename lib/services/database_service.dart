@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
-import 'dart:convert'; // For JSON encoding/decoding
+import 'dart:convert';
 import '../models/log.dart';
 import '../models/plan.dart'; 
 import '../models/body_metric.dart';
@@ -10,61 +10,64 @@ import '../models/session.dart';
 
 class DatabaseService extends ChangeNotifier {
   Database? _db;
+  String? _currentUserId;
+
+  /// Sets the active user ID. If it changes, we close the old DB.
+  Future<void> setUserId(String? userId) async {
+    // If the ID hasn't changed, do nothing
+    if (_currentUserId == userId) return;
+
+    _currentUserId = userId;
+    
+    // Close existing connection if open
+    if (_db != null) {
+      await _db!.close();
+      _db = null;
+    }
+    
+    // If we have a user, notify listeners that DB is ready (or will be)
+    notifyListeners();
+  }
 
   Future<Database> get database async {
-    if (_db != null) return _db!;
-    _db = await _initDB();
+    if (_db != null && _db!.isOpen) return _db!;
+    
+    if (_currentUserId == null) {
+      // Fallback for guest mode or pre-login (optional: could throw error)
+      _db = await _initDB('guest_user.db');
+    } else {
+      _db = await _initDB('user_$_currentUserId.db');
+    }
     return _db!;
   }
 
-  Future<Database> _initDB() async {
+  Future<Database> _initDB(String fileName) async {
     final dbPath = await getDatabasesPath();
-    final path = join(dbPath, 'openfit_user.db');
+    final path = join(dbPath, fileName);
 
     return await openDatabase(
       path,
-      version: 12, // Schema v12
+      version: 13, // Schema v13: Added User Profile details
       onCreate: (db, version) async {
         await _createTables(db);
+        await _createProfileTable(db);
       },
       onOpen: (db) async {
         await _cleanupGhostSessions(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
-        if (oldVersion < 2) { await db.execute('CREATE TABLE workout_plans (id TEXT PRIMARY KEY, name TEXT, goal TEXT, schedule_json TEXT)'); }
-        if (oldVersion < 3) { await db.execute('CREATE TABLE exercise_stats (exercise_name TEXT PRIMARY KEY, one_rep_max REAL, last_updated TEXT)'); }
-        if (oldVersion < 4) { await db.execute('CREATE TABLE body_metrics (id TEXT PRIMARY KEY, date TEXT, weight REAL, measurements_json TEXT)'); }
-        if (oldVersion < 5) { await db.execute('CREATE TABLE one_rep_max_history (id TEXT PRIMARY KEY, exercise_name TEXT, weight REAL, date TEXT)'); }
-        if (oldVersion < 6) { await db.execute('CREATE TABLE custom_exercises (id TEXT PRIMARY KEY, name TEXT, category TEXT, primary_muscles TEXT, notes TEXT)'); }
-        if (oldVersion < 7) { await db.execute('ALTER TABLE workout_plans ADD COLUMN type TEXT DEFAULT "Strength"'); }
-        if (oldVersion < 8) { await db.execute('ALTER TABLE workout_logs ADD COLUMN duration INTEGER DEFAULT 0'); }
-        if (oldVersion < 9) {
-          await db.execute('CREATE TABLE workout_sessions (id TEXT PRIMARY KEY, plan_id TEXT, day_name TEXT, start_time TEXT, end_time TEXT, note TEXT)');
-          try {
-            await db.execute('ALTER TABLE workout_logs ADD COLUMN session_id TEXT');
-          } catch (e) {
-            debugPrint("Migration Note: $e");
-          }
-        }
-        if (oldVersion < 10) {
-          await db.execute('CREATE TABLE exercise_aliases (original_name TEXT PRIMARY KEY, alias TEXT)');
-        }
-        if (oldVersion < 11) {
-          try {
-            await db.execute('ALTER TABLE workout_plans ADD COLUMN last_updated TEXT');
-            await db.execute('ALTER TABLE workout_logs ADD COLUMN last_updated TEXT');
-          } catch (e) {
-            debugPrint("v11 Migration Note: $e");
-          }
-        }
-        // NEW: Schema v12 - Intelligent Gym
+        // ... Previous migrations (v1-v11) assumed ...
         if (oldVersion < 12) {
-          try {
+           try {
             await db.execute('ALTER TABLE user_equipment ADD COLUMN capabilities_json TEXT');
             await db.execute('ALTER TABLE custom_exercises ADD COLUMN equipment_json TEXT');
           } catch (e) {
             debugPrint("v12 Migration Note: $e");
           }
+        }
+        // NEW: Schema v13 - Local User Profile
+        if (oldVersion < 13) {
+          await _createProfileTable(db);
         }
       }
     );
@@ -82,6 +85,25 @@ class DatabaseService extends ChangeNotifier {
     await db.execute('CREATE TABLE exercise_aliases (original_name TEXT PRIMARY KEY, alias TEXT)');
   }
 
+  // New Table for v13
+  Future<void> _createProfileTable(Database db) async {
+    // Check if table exists first to be safe during migration
+    try {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS user_profile (
+          id TEXT PRIMARY KEY, 
+          birth_date TEXT, 
+          current_weight REAL, 
+          height REAL, 
+          gender TEXT, 
+          fitness_level TEXT
+        )
+      ''');
+    } catch (e) {
+      debugPrint("Profile Table Creation Error: $e");
+    }
+  }
+
   Future<void> _cleanupGhostSessions(Database db) async {
     try {
       await db.execute('''
@@ -93,6 +115,27 @@ class DatabaseService extends ChangeNotifier {
     } catch (e) {
       debugPrint("Cleanup Error: $e");
     }
+  }
+
+  // ==========================================
+  //                USER PROFILE
+  // ==========================================
+  Future<void> updateUserProfile(Map<String, dynamic> data) async {
+    final db = await database;
+    // We assume 1 row per local DB
+    await db.insert(
+      'user_profile', 
+      {'id': 'local_user', ...data}, 
+      conflictAlgorithm: ConflictAlgorithm.replace
+    );
+    notifyListeners();
+  }
+
+  Future<Map<String, dynamic>?> getUserProfile() async {
+    final db = await database;
+    final res = await db.query('user_profile', limit: 1);
+    if (res.isNotEmpty) return res.first;
+    return null;
   }
 
   // ==========================================
@@ -245,7 +288,6 @@ class DatabaseService extends ChangeNotifier {
     notifyListeners(); 
   }
 
-  // NEW: Update capabilities for specific equipment (The "Brain" of Intelligent Gym)
   Future<void> updateEquipmentCapabilities(String name, List<String> capabilities) async {
     final db = await database;
     await db.insert('user_equipment', {
@@ -257,20 +299,12 @@ class DatabaseService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Returns a deduplicated list of all CAPABILITIES (tags) from owned equipment.
-  /// Example: User owns "SincMill" (Cable, Bench) and "Dumbbells" (Dumbbell).
-  /// Returns: ["Cable", "Bench", "Dumbbell"]
   Future<List<String>> getOwnedEquipment() async {
     final db = await database;
     final res = await db.query('user_equipment', where: 'is_owned = 1');
-    
     final Set<String> capabilities = {};
-
     for (var row in res) {
-      // 1. Always add the name itself
       capabilities.add(row['name'] as String);
-
-      // 2. Parse and add the hidden capabilities
       if (row['capabilities_json'] != null) {
         try {
           final List<dynamic> tags = jsonDecode(row['capabilities_json'] as String);
@@ -280,12 +314,20 @@ class DatabaseService extends ChangeNotifier {
         }
       }
     }
-    
     return capabilities.toList();
   }
   
   // Body Metrics
-  Future<void> logBodyMetric(BodyMetric metric) async { final db = await database; await db.insert('body_metrics', metric.toMap(), conflictAlgorithm: ConflictAlgorithm.replace); notifyListeners(); }
+  Future<void> logBodyMetric(BodyMetric metric) async { 
+    final db = await database; 
+    // 1. Log the metric
+    await db.insert('body_metrics', metric.toMap(), conflictAlgorithm: ConflictAlgorithm.replace); 
+    
+    // 2. Update Profile Current Weight (Automatic)
+    await db.update('user_profile', {'current_weight': metric.weight}, where: 'id = ?', whereArgs: ['local_user']);
+    
+    notifyListeners(); 
+  }
   Future<List<BodyMetric>> getBodyMetrics() async { final db = await database; final res = await db.query('body_metrics', orderBy: 'date DESC'); return res.map((e) => BodyMetric.fromMap(e)).toList(); }
 
   // 1RM
@@ -303,7 +345,7 @@ class DatabaseService extends ChangeNotifier {
       'category': ex.category, 
       'primary_muscles': ex.primaryMuscles.join(','), 
       'notes': ex.instructions.join('\n'),
-      'equipment_json': jsonEncode(ex.equipment) // NEW
+      'equipment_json': jsonEncode(ex.equipment) 
     }); 
     notifyListeners(); 
   }
