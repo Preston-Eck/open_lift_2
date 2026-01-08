@@ -15,12 +15,10 @@ class EquipmentManagerScreen extends StatefulWidget {
 
 class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> {
   final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _contextController = TextEditingController();
   List<String> _aiDetectedTags = []; 
   bool _isAnalyzing = false;
   bool _isLoading = true;
 
-  // Replaced simple Map with List of Maps to support full editing
   List<Map<String, dynamic>> _ownedItems = [];
 
   @override
@@ -30,6 +28,7 @@ class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> {
   }
 
   Future<void> _loadData() async {
+    if (!mounted) return;
     final db = context.read<DatabaseService>();
     try {
       final items = await db.getUserEquipmentList();
@@ -45,254 +44,80 @@ class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> {
   }
 
   Future<void> _saveNewItem() async {
+    if (!mounted) return;
     final db = context.read<DatabaseService>();
     final name = _nameController.text;
     if (name.isEmpty) return;
 
     await db.updateEquipmentCapabilities(name, _aiDetectedTags);
     
-    // Clear & Reload
-    setState(() {
-      _nameController.clear();
-      _contextController.clear();
-      _aiDetectedTags = [];
-    });
-    await _loadData();
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Added $name!")));
-  }
-
-  // NEW: Search for an exercise to link its capabilities
-  Future<void> _importCapabilitiesFromExercise(Map<String, dynamic> equipmentItem) async {
-    String? selectedExerciseName;
-    List<String> newTags = [];
-
-    // 1. Show Search Dialog
-    await showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Link Exercise to Equipment"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-             const Text("Search for an exercise (e.g., 'Lat Pulldown'). We will add its required equipment tags (e.g., 'Cable') to this machine."),
-             const SizedBox(height: 10),
-             Autocomplete<Exercise>(
-                optionsBuilder: (TextEditingValue textEditingValue) async {
-                  if (textEditingValue.text.isEmpty) return const Iterable<Exercise>.empty();
-                  // Search Supabase (Wiki)
-                  try {
-                    final data = await Supabase.instance.client
-                        .from('exercises')
-                        .select()
-                        .ilike('name', '%${textEditingValue.text}%')
-                        .limit(5);
-                    return (data as List).map((e) => Exercise.fromJson(e));
-                  } catch (e) {
-                    return const Iterable<Exercise>.empty();
-                  }
-                },
-                displayStringForOption: (Exercise option) => option.name,
-                onSelected: (Exercise selection) {
-                  selectedExerciseName = selection.name;
-                  newTags = selection.equipment;
-                  // If no specific equipment required, maybe add the name itself?
-                  if (newTags.isEmpty) newTags.add(selection.name);
-                },
-             ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text("Import Tags"),
-          )
-        ],
-      )
-    );
-
-    if (selectedExerciseName == null) return;
-
-    // 2. Merge Tags
-    final currentJson = equipmentItem['capabilities_json'];
-    List<String> currentTags = [];
-    if (currentJson != null) {
-      currentTags = List<String>.from(jsonDecode(currentJson));
-    }
-
-    // Add new tags if unique
-    int addedCount = 0;
-    for (var tag in newTags) {
-      if (!currentTags.contains(tag)) {
-        currentTags.add(tag);
-        addedCount++;
-      }
-    }
-
-    // 3. Save
-    if (addedCount > 0) {
-      await context.read<DatabaseService>().updateEquipmentCapabilities(
-        equipmentItem['name'], 
-        currentTags
-      );
-      await _loadData();
+    if (mounted) {
+      setState(() {
+        _nameController.clear();
+        _aiDetectedTags = [];
+      });
+      await _loadData(); // Refresh list
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Added $addedCount tags from '$selectedExerciseName'")));
-      }
-    } else {
-       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("No new tags to add.")));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Added $name!")));
       }
     }
   }
 
-  void _showEditDialog(Map<String, dynamic> item) {
-    final tagsJson = item['capabilities_json'];
-    List<String> tags = tagsJson != null ? List<String>.from(jsonDecode(tagsJson)) : [];
-    if (tags.isEmpty) tags.add(item['name']); // Default to name if empty
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setSheetState) {
-          return Padding(
-            padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom, left: 16, right: 16, top: 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text("Edit ${item['name']}", style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 10),
-                const Text("Capabilities / Tags:", style: TextStyle(fontWeight: FontWeight.bold)),
-                Wrap(
-                  spacing: 8,
-                  children: tags.map((t) => Chip(
-                    label: Text(t),
-                    onDeleted: () {
-                      setSheetState(() => tags.remove(t));
-                    },
-                  )).toList(),
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    TextButton.icon(
-                      icon: const Icon(Icons.add),
-                      label: const Text("Add Tag"),
-                      onPressed: () {
-                        // Simple Text Input Dialog
-                        showDialog(
-                          context: context,
-                          builder: (c) {
-                            final textC = TextEditingController();
-                            return AlertDialog(
-                              title: const Text("Add Tag"),
-                              content: TextField(controller: textC, autofocus: true),
-                              actions: [
-                                ElevatedButton(
-                                  onPressed: () {
-                                    if(textC.text.isNotEmpty) {
-                                      setSheetState(() => tags.add(textC.text));
-                                    }
-                                    Navigator.pop(c);
-                                  },
-                                  child: const Text("Add")
-                                )
-                              ],
-                            );
-                          }
-                        );
-                      },
-                    ),
-                    const Spacer(),
-                    ElevatedButton.icon(
-                      icon: const Icon(Icons.fitness_center),
-                      label: const Text("Link Exercise..."),
-                      style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple, foregroundColor: Colors.white),
-                      onPressed: () async {
-                        // Close sheet, trigger import, then re-open? 
-                        // Easier to just run logic and update local state
-                        Navigator.pop(ctx); 
-                        await _importCapabilitiesFromExercise(item);
-                      },
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    child: const Text("Save Changes"),
-                    onPressed: () async {
-                      await context.read<DatabaseService>().updateEquipmentCapabilities(item['name'], tags);
-                      Navigator.pop(ctx);
-                      _loadData();
-                    },
-                  ),
-                ),
-                const SizedBox(height: 20),
-              ],
-            ),
-          );
-        },
-      ),
+  void _openEditor(Map<String, dynamic> item) async {
+    // STABILITY FIX: Use full screen navigation instead of Dialogs
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => EquipmentEditorScreen(item: item)),
     );
+    _loadData(); // Refresh on return
   }
 
   @override
   Widget build(BuildContext context) {
     final gemini = Provider.of<GeminiService>(context, listen: false);
-    final db = context.read<DatabaseService>(); // for passing to sub-widgets
 
     return Scaffold(
       appBar: AppBar(title: const Text("Manage Equipment")),
       body: _isLoading 
         ? const Center(child: CircularProgressIndicator()) 
-        : ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              _buildAddCustomSection(gemini),
-              const Divider(height: 30),
-              
-              if (_ownedItems.isEmpty)
-                const Center(child: Text("Your gym is empty.", style: TextStyle(color: Colors.grey))),
-
-              ..._ownedItems.map((item) {
-                final tagsJson = item['capabilities_json'];
-                final tags = tagsJson != null ? List<String>.from(jsonDecode(tagsJson)) : <String>[];
+        : SingleChildScrollView( 
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              children: [
+                _buildAddCustomSection(gemini),
+                const Divider(height: 30),
+                if (_ownedItems.isEmpty)
+                  const Center(child: Text("Your gym is empty.", style: TextStyle(color: Colors.grey))),
                 
-                return Card(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  child: ListTile(
-                    title: Text(item['name'], style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: Text(tags.take(3).join(", ") + (tags.length > 3 ? "..." : ""), style: const TextStyle(fontSize: 12)),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.edit, color: Colors.blue),
-                          onPressed: () => _showEditDialog(item),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.delete, color: Colors.red),
-                          onPressed: () async {
-                            await context.read<DatabaseService>().updateEquipment(item['name'], false);
-                            _loadData();
-                          },
-                        ),
-                      ],
+                ..._ownedItems.map((item) {
+                  final tagsJson = item['capabilities_json'];
+                  final tags = tagsJson != null ? List<String>.from(jsonDecode(tagsJson)) : <String>[];
+                  
+                  return Card(
+                    key: ValueKey("eq_${item['name']}"), 
+                    margin: const EdgeInsets.only(bottom: 8),
+                    child: ListTile(
+                      title: Text(item['name'], style: const TextStyle(fontWeight: FontWeight.bold)),
+                      subtitle: Text(tags.take(5).join(", ") + (tags.length > 5 ? "..." : ""), style: const TextStyle(fontSize: 12)),
+                      onTap: () => _openEditor(item), // Tap whole row to edit
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete, color: Colors.red),
+                        onPressed: () async {
+                          await context.read<DatabaseService>().updateEquipment(item['name'], false);
+                          _loadData();
+                        },
+                      ),
                     ),
-                  ),
-                );
-              }),
-            ],
+                  );
+                }),
+                const SizedBox(height: 40),
+              ],
+            ),
           ),
     );
   }
 
   Widget _buildAddCustomSection(GeminiService gemini) {
-    // ... (This section remains mostly the same, but I'll condense it for the response to focus on the new features)
     return Card(
       color: Colors.grey[100],
       child: Padding(
@@ -335,6 +160,197 @@ class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+// --- FULL SCREEN EDITOR (STABLE) ---
+class EquipmentEditorScreen extends StatefulWidget {
+  final Map<String, dynamic> item;
+  const EquipmentEditorScreen({super.key, required this.item});
+
+  @override
+  State<EquipmentEditorScreen> createState() => _EquipmentEditorScreenState();
+}
+
+class _EquipmentEditorScreenState extends State<EquipmentEditorScreen> {
+  late List<String> _tags;
+
+  @override
+  void initState() {
+    super.initState();
+    final json = widget.item['capabilities_json'];
+    _tags = json != null ? List<String>.from(jsonDecode(json)) : [];
+    if (_tags.isEmpty) _tags.add(widget.item['name']);
+  }
+
+  Future<void> _save() async {
+    final db = context.read<DatabaseService>();
+    await db.updateEquipmentCapabilities(widget.item['name'], _tags);
+    if (mounted) Navigator.pop(context);
+  }
+
+  Future<void> _linkExercise() async {
+    // Navigate to Search Screen
+    final Exercise? result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const EquipmentSearchScreen()),
+    );
+
+    if (result != null) {
+      setState(() {
+        for (var t in result.equipment) {
+          if (!_tags.contains(t)) _tags.add(t);
+        }
+        if (!_tags.contains(result.name)) _tags.add(result.name); // Add exercise name itself if equipment list is empty
+      });
+    }
+  }
+
+  void _addManualTag() {
+    // Simple dialogs for text input are usually fine, but let's be safe
+    final textC = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Add Tag"),
+        content: TextField(controller: textC, autofocus: true),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
+          ElevatedButton(
+            onPressed: () {
+              if (textC.text.isNotEmpty) {
+                setState(() => _tags.add(textC.text));
+              }
+              Navigator.pop(ctx);
+            }, 
+            child: const Text("Add")
+          )
+        ],
+      )
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text("Edit ${widget.item['name']}"),
+        actions: [
+          IconButton(icon: const Icon(Icons.save), onPressed: _save)
+        ],
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text("Capabilities define what exercises this machine can perform.", style: TextStyle(color: Colors.grey)),
+            const SizedBox(height: 20),
+            
+            const Text("Current Tags", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _tags.map((t) => Chip(
+                label: Text(t),
+                deleteIcon: const Icon(Icons.close, size: 18),
+                onDeleted: () => setState(() => _tags.remove(t)),
+              )).toList(),
+            ),
+            
+            const SizedBox(height: 30),
+            const Divider(),
+            const SizedBox(height: 10),
+            
+            const Text("Add Capabilities", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            const SizedBox(height: 10),
+            ListTile(
+              leading: const CircleAvatar(child: Icon(Icons.edit)),
+              title: const Text("Manual Entry"),
+              subtitle: const Text("Type a capability tag manually"),
+              onTap: _addManualTag,
+            ),
+            ListTile(
+              leading: const CircleAvatar(child: Icon(Icons.search)),
+              title: const Text("Infer from Exercise"),
+              subtitle: const Text("Search an exercise (e.g. 'Lat Pulldown') to auto-add its tags"),
+              onTap: _linkExercise,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// --- FULL SCREEN SEARCH (STABLE) ---
+class EquipmentSearchScreen extends StatefulWidget {
+  const EquipmentSearchScreen({super.key});
+
+  @override
+  State<EquipmentSearchScreen> createState() => _EquipmentSearchScreenState();
+}
+
+class _EquipmentSearchScreenState extends State<EquipmentSearchScreen> {
+  final TextEditingController _ctrl = TextEditingController();
+  List<Exercise> _results = [];
+  bool _searching = false;
+
+  Future<void> _doSearch() async {
+    if (_ctrl.text.isEmpty) return;
+    setState(() => _searching = true);
+    
+    try {
+      final data = await Supabase.instance.client
+          .from('exercises')
+          .select()
+          .ilike('name', '%${_ctrl.text}%')
+          .limit(15);
+      
+      if (mounted) {
+        setState(() {
+          _results = (data as List).map((e) => Exercise.fromJson(e)).toList();
+          _searching = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _searching = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: TextField(
+          controller: _ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: "Search Exercise...",
+            border: InputBorder.none,
+          ),
+          onSubmitted: (_) => _doSearch(),
+        ),
+        actions: [
+          IconButton(icon: const Icon(Icons.search), onPressed: _doSearch)
+        ],
+      ),
+      body: _searching 
+        ? const LinearProgressIndicator() 
+        : ListView.separated(
+            itemCount: _results.length,
+            separatorBuilder: (_, __) => const Divider(height: 1),
+            itemBuilder: (ctx, i) {
+              final ex = _results[i];
+              return ListTile(
+                title: Text(ex.name),
+                subtitle: Text(ex.equipment.join(", ")),
+                onTap: () => Navigator.pop(context, ex),
+              );
+            },
+          ),
     );
   }
 }

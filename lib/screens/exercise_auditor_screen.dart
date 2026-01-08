@@ -64,7 +64,6 @@ class _ExerciseAuditorScreenState extends State<ExerciseAuditorScreen> {
     }
   }
 
-  // ✅ FIXED: Syntax error corrected here
   Future<void> _generateForTag(String tag) async {
     setState(() => _isLoading = true);
     final gemini = context.read<GeminiService>();
@@ -88,11 +87,11 @@ class _ExerciseAuditorScreenState extends State<ExerciseAuditorScreen> {
       }
 
       await showDialog(
-        context: context,
+        context: context, // Use the Screen's context
         barrierDismissible: false,
-        builder: (ctx) {
+        builder: (dialogCtx) { // Renamed to avoid shadowing
           return StatefulBuilder( 
-            builder: (context, setDialogState) {
+            builder: (innerCtx, setDialogState) { // Renamed to avoid shadowing
               return AlertDialog(
                 title: Text("Suggested for $tag"),
                 content: SizedBox(
@@ -141,7 +140,7 @@ class _ExerciseAuditorScreenState extends State<ExerciseAuditorScreen> {
                 ),
                 actions: [
                   TextButton(
-                    onPressed: () => Navigator.pop(ctx), 
+                    onPressed: () => Navigator.pop(dialogCtx), 
                     child: const Text("Cancel")
                   ),
                   ElevatedButton(
@@ -166,10 +165,12 @@ class _ExerciseAuditorScreenState extends State<ExerciseAuditorScreen> {
                         }
                       }
                       
-                      // ✅ FIXED: Safe context usage across async gap
-                      if (ctx.mounted) {
-                        Navigator.pop(ctx);
+                      // 1. Close the dialog using its specific context
+                      if (dialogCtx.mounted) {
+                        Navigator.pop(dialogCtx);
                       }
+
+                      // 2. Show SnackBar using the Main Screen's context (not shadowed anymore)
                       if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Added $addedCount exercises!")));
                       }
