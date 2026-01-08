@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:supabase_flutter/supabase_flutter.dart'; // NEW
+import 'package:supabase_flutter/supabase_flutter.dart'; 
 import '../services/database_service.dart';
 import '../services/gemini_service.dart';
 import '../models/plan.dart';
@@ -30,46 +29,49 @@ class _PlanGeneratorScreenState extends State<PlanGeneratorScreen> {
     final gemini = context.read<GeminiService>();
     
     try {
-      // 1. Fetch Local Data
+      // 1. Fetch Local Data (Equipment)
       final equipment = await db.getOwnedEquipment();
       if (equipment.isEmpty) {
         if (mounted) {
            ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("You need equipment to generate a plan!"))
+            const SnackBar(content: Text("You need equipment to generate a plan! Go to Manage Equipment."))
           );
         }
         setState(() => _isLoading = false);
         return;
       }
 
-      final prefs = await SharedPreferences.getInstance();
-      final userProfile = {
-        'Age': prefs.getString('user_age') ?? 'Unknown',
-        'Height': prefs.getString('user_height') ?? 'Unknown',
-        'Weight': prefs.getString('user_weight') ?? 'Unknown',
-        'Gender': prefs.getString('user_gender') ?? 'Unknown',
-        'Fitness Level': prefs.getString('user_fitness_level') ?? 'Intermediate',
+      // 2. Fetch User Profile (Database)
+      final profileData = await db.getUserProfile();
+      
+      // FIX: Explicitly convert dynamic DB values to Strings for the AI Service
+      final Map<String, String> userProfile = {
+        'Age': profileData?['birth_date']?.toString() ?? 'Unknown',
+        'Height': profileData?['height']?.toString() ?? 'Unknown',
+        'Weight': profileData?['current_weight']?.toString() ?? 'Unknown',
+        'Gender': profileData?['gender']?.toString() ?? 'Unknown',
+        'Fitness Level': profileData?['fitness_level']?.toString() ?? 'Intermediate',
       };
 
+      // 3. Fetch Strength Stats (1RMs)
       final oneRepMaxes = await db.getLatestOneRepMaxes();
       final strengthStats = oneRepMaxes.isEmpty 
           ? "No recorded strength data (assume beginner)"
-          : oneRepMaxes.entries.map((e) => "${e.key}: ${e.value}lbs").join(", ");
+          : oneRepMaxes.entries.map((e) => "${e.key}: ${e.value.toInt()}lbs").join(", ");
 
-      // 2. NEW: Fetch Wiki Vocabulary (RAG)
+      // 4. Fetch Wiki Vocabulary (RAG)
       List<String> validExercises = [];
       try {
         final response = await Supabase.instance.client
             .from('exercises')
             .select('name')
-            .limit(100); // Fetch top 100 for context
+            .limit(100); 
         validExercises = (response as List).map((e) => e['name'] as String).toList();
       } catch (e) {
         debugPrint("Supabase Fetch Error (Offline?): $e");
-        // Fallback: If offline, Gemini will just guess, which is acceptable
       }
 
-      // 3. Call AI
+      // 5. Call AI
       final plan = await gemini.generateFullPlan(
         _goalController.text,
         _daysPerWeek,
@@ -77,7 +79,7 @@ class _PlanGeneratorScreenState extends State<PlanGeneratorScreen> {
         equipment,
         userProfile,
         strengthStats, 
-        validExercises, // Pass the vocabulary
+        validExercises, 
       );
       
       setState(() {

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/database_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -10,10 +12,15 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   final _ageController = TextEditingController();
-  final _heightController = TextEditingController();
+  final _heightCmController = TextEditingController();
+  final _feetController = TextEditingController();
+  final _inchesController = TextEditingController();
   final _weightController = TextEditingController();
+  
   String _gender = 'Male';
   String _fitnessLevel = 'Intermediate';
+  String _unitSystem = 'Imperial'; 
+  bool _isLoading = true;
 
   @override
   void initState() {
@@ -22,23 +29,76 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _loadSettings() async {
+    final db = context.read<DatabaseService>();
     final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _ageController.text = prefs.getString('user_age') ?? '';
-      _heightController.text = prefs.getString('user_height') ?? '';
-      _weightController.text = prefs.getString('user_weight') ?? '';
-      _gender = prefs.getString('user_gender') ?? 'Male';
-      _fitnessLevel = prefs.getString('user_fitness_level') ?? 'Intermediate';
-    });
+    final profile = await db.getUserProfile();
+
+    if (mounted) {
+      setState(() {
+        _unitSystem = prefs.getString('units') ?? 'Imperial';
+
+        if (profile != null) {
+          _ageController.text = profile['birth_date'] ?? '';
+          _gender = profile['gender'] ?? 'Male';
+          _fitnessLevel = profile['fitness_level'] ?? 'Intermediate';
+
+          double storedWeight = profile['current_weight'] ?? 0.0;
+          if (_unitSystem == 'Metric') {
+            _weightController.text = (storedWeight * 0.453592).toStringAsFixed(1);
+          } else {
+            _weightController.text = storedWeight.toStringAsFixed(1);
+          }
+
+          double storedHeight = profile['height'] ?? 0.0;
+          if (_unitSystem == 'Imperial') {
+            double totalInches = storedHeight / 2.54;
+            int feet = (totalInches / 12).floor();
+            int inches = (totalInches % 12).round();
+            _feetController.text = feet.toString();
+            _inchesController.text = inches.toString();
+          } else {
+            _heightCmController.text = storedHeight.toStringAsFixed(0);
+          }
+        }
+        _isLoading = false;
+      });
+    }
   }
 
   Future<void> _saveSettings() async {
+    final db = context.read<DatabaseService>();
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('user_age', _ageController.text);
-    await prefs.setString('user_height', _heightController.text);
-    await prefs.setString('user_weight', _weightController.text);
-    await prefs.setString('user_gender', _gender);
-    await prefs.setString('user_fitness_level', _fitnessLevel);
+    
+    await prefs.setString('units', _unitSystem);
+
+    double? weightToStore;
+    double? uiWeight = double.tryParse(_weightController.text);
+    if (uiWeight != null) {
+      if (_unitSystem == 'Metric') {
+        weightToStore = uiWeight * 2.20462;
+      } else {
+        weightToStore = uiWeight;
+      }
+    }
+
+    double? heightToStore;
+    if (_unitSystem == 'Metric') {
+      heightToStore = double.tryParse(_heightCmController.text);
+    } else {
+      double feet = double.tryParse(_feetController.text) ?? 0;
+      double inches = double.tryParse(_inchesController.text) ?? 0;
+      if (feet > 0 || inches > 0) {
+        heightToStore = (feet * 12 + inches) * 2.54;
+      }
+    }
+
+    await db.updateUserProfile({
+      'birth_date': _ageController.text,
+      'height': heightToStore,
+      'current_weight': weightToStore,
+      'gender': _gender,
+      'fitness_level': _fitnessLevel,
+    });
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -47,63 +107,142 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  void _toggleUnits(int index) {
+    setState(() {
+      String newSystem = index == 0 ? 'Imperial' : 'Metric';
+      if (_unitSystem == newSystem) return; 
+
+      double currentVal = double.tryParse(_weightController.text) ?? 0;
+      if (currentVal > 0) {
+        if (newSystem == 'Metric') {
+          _weightController.text = (currentVal * 0.453592).toStringAsFixed(1);
+        } else {
+          _weightController.text = (currentVal * 2.20462).toStringAsFixed(1);
+        }
+      }
+
+      if (newSystem == 'Metric') {
+        double f = double.tryParse(_feetController.text) ?? 0;
+        double i = double.tryParse(_inchesController.text) ?? 0;
+        double cm = (f * 12 + i) * 2.54;
+        _heightCmController.text = cm.toStringAsFixed(0);
+      } else {
+        double cm = double.tryParse(_heightCmController.text) ?? 0;
+        double totalInches = cm / 2.54;
+        _feetController.text = (totalInches / 12).floor().toString();
+        _inchesController.text = (totalInches % 12).round().toString();
+      }
+
+      _unitSystem = newSystem;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isMetric = _unitSystem == 'Metric';
+
     return Scaffold(
       appBar: AppBar(title: const Text("User Profile & Settings")),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          const Text("About You", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 5),
-          const Text("This data is sent to the AI Coach to tailor your plans."),
-          const SizedBox(height: 20),
+      body: _isLoading 
+        ? const Center(child: CircularProgressIndicator()) 
+        : ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              Center(
+                child: ToggleButtons(
+                  isSelected: [_unitSystem == 'Imperial', _unitSystem == 'Metric'],
+                  onPressed: _toggleUnits,
+                  borderRadius: BorderRadius.circular(8),
+                  children: const [
+                    Padding(padding: EdgeInsets.symmetric(horizontal: 24), child: Text("Imperial")),
+                    Padding(padding: EdgeInsets.symmetric(horizontal: 24), child: Text("Metric")),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
 
-          TextField(
-            controller: _ageController,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: "Age", border: OutlineInputBorder()),
-          ),
-          const SizedBox(height: 10),
-          
-          TextField(
-            controller: _heightController,
-            keyboardType: TextInputType.text,
-            decoration: const InputDecoration(labelText: "Height (e.g. 5'10\" or 178cm)", border: OutlineInputBorder()),
-          ),
-          const SizedBox(height: 10),
+              const Text("Personal Stats", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 10),
 
-          TextField(
-            controller: _weightController,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: "Weight (lbs)", border: OutlineInputBorder()),
-          ),
-          const SizedBox(height: 10),
+              TextField(
+                controller: _ageController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: "Age", border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 10),
+              
+              if (isMetric)
+                TextField(
+                  controller: _heightCmController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: "Height (cm)", border: OutlineInputBorder()),
+                )
+              else
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _feetController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(labelText: "Height (Ft)", border: OutlineInputBorder()),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextField(
+                        controller: _inchesController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(labelText: "Height (In)", border: OutlineInputBorder()),
+                      ),
+                    ),
+                  ],
+                ),
+              const SizedBox(height: 10),
 
-          DropdownButtonFormField<String>(
-            initialValue: _gender,
-            decoration: const InputDecoration(labelText: "Gender", border: OutlineInputBorder()),
-            items: ['Male', 'Female', 'Other'].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-            onChanged: (val) => setState(() => _gender = val!),
-          ),
-          const SizedBox(height: 10),
+              TextField(
+                controller: _weightController,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText: isMetric ? "Weight (kg)" : "Weight (lbs)", 
+                  border: const OutlineInputBorder()
+                ),
+              ),
+              const SizedBox(height: 10),
 
-          DropdownButtonFormField<String>(
-            initialValue: _fitnessLevel,
-            decoration: const InputDecoration(labelText: "Fitness Level", border: OutlineInputBorder()),
-            items: ['Beginner', 'Intermediate', 'Advanced', 'Elite'].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-            onChanged: (val) => setState(() => _fitnessLevel = val!),
+              InputDecorator(
+                decoration: const InputDecoration(labelText: "Gender", border: OutlineInputBorder()),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: ['Male', 'Female', 'Other'].contains(_gender) ? _gender : 'Male',
+                    isDense: true,
+                    items: ['Male', 'Female', 'Other'].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+                    onChanged: (val) => setState(() => _gender = val!),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+
+              InputDecorator(
+                decoration: const InputDecoration(labelText: "Fitness Level", border: OutlineInputBorder()),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: ['Beginner', 'Intermediate', 'Advanced', 'Elite'].contains(_fitnessLevel) ? _fitnessLevel : 'Intermediate',
+                    isDense: true,
+                    items: ['Beginner', 'Intermediate', 'Advanced', 'Elite'].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+                    onChanged: (val) => setState(() => _fitnessLevel = val!),
+                  ),
+                ),
+              ),
+              
+              const SizedBox(height: 30),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.save),
+                label: const Text("Save Profile"),
+                style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50)),
+                onPressed: _saveSettings,
+              )
+            ],
           ),
-          
-          const SizedBox(height: 30),
-          ElevatedButton.icon(
-            icon: const Icon(Icons.save),
-            label: const Text("Save Profile"),
-            style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50)),
-            onPressed: _saveSettings,
-          )
-        ],
-      ),
     );
   }
 }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // NEW
 import '../models/body_metric.dart';
 import '../services/database_service.dart';
 
@@ -22,23 +23,55 @@ class _BodyMetricsScreenState extends State<BodyMetricsScreen> {
     'Chest': TextEditingController(),
   };
 
+  String _unitSystem = 'Imperial'; // Default
+  bool _isMetric = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPreferences();
+  }
+
+  Future<void> _loadPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _unitSystem = prefs.getString('units') ?? 'Imperial';
+        _isMetric = _unitSystem == 'Metric';
+      });
+    }
+  }
+
+  // Helper: Convert Input (Display) -> DB (Lbs)
+  double? _getStorageWeight(String text) {
+    double? val = double.tryParse(text);
+    if (val == null) return null;
+    return _isMetric ? val * 2.20462 : val;
+  }
+
+  // Helper: Convert DB (Lbs) -> Display
+  double _getDisplayWeight(double lbs) {
+    return _isMetric ? lbs * 0.453592 : lbs;
+  }
+
   void _saveEntry() {
-    final weight = double.tryParse(_weightController.text);
-    Map<String, double> measurements = {};
+    final weightLbs = _getStorageWeight(_weightController.text);
     
-    // Fix: Use for-in loop instead of forEach
+    Map<String, double> measurements = {};
     for (var entry in _measurementsControllers.entries) {
       if (entry.value.text.isNotEmpty) {
+        // Measurement units (in vs cm) logic can be added here similarly
+        // For now, assuming raw input storage for measurements
         measurements[entry.key] = double.tryParse(entry.value.text) ?? 0.0;
       }
     }
 
-    if (weight == null && measurements.isEmpty) return;
+    if (weightLbs == null && measurements.isEmpty) return;
 
     final metric = BodyMetric(
       id: const Uuid().v4(),
       date: DateTime.now(),
-      weight: weight,
+      weight: weightLbs,
       measurements: measurements,
     );
 
@@ -54,6 +87,8 @@ class _BodyMetricsScreenState extends State<BodyMetricsScreen> {
   @override
   Widget build(BuildContext context) {
     final db = Provider.of<DatabaseService>(context);
+    final unitLabel = _isMetric ? "kg" : "lbs";
+    final lenLabel = _isMetric ? "cm" : "in";
 
     return Scaffold(
       appBar: AppBar(title: const Text("Body Metrics")),
@@ -78,7 +113,7 @@ class _BodyMetricsScreenState extends State<BodyMetricsScreen> {
                         TextField(
                           controller: _weightController,
                           keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(labelText: "Weight (lbs)"),
+                          decoration: InputDecoration(labelText: "Weight ($unitLabel)"),
                         ),
                         const SizedBox(height: 10),
                         Wrap(
@@ -90,7 +125,7 @@ class _BodyMetricsScreenState extends State<BodyMetricsScreen> {
                               child: TextField(
                                 controller: _measurementsControllers[key],
                                 keyboardType: TextInputType.number,
-                                decoration: InputDecoration(labelText: "$key (in)", isDense: true),
+                                decoration: InputDecoration(labelText: "$key ($lenLabel)", isDense: true),
                               ),
                             );
                           }).toList(),
@@ -117,7 +152,10 @@ class _BodyMetricsScreenState extends State<BodyMetricsScreen> {
                           LineChartBarData(
                             spots: data
                                 .where((e) => e.weight != null)
-                                .map((e) => FlSpot(e.date.millisecondsSinceEpoch.toDouble(), e.weight!))
+                                .map((e) => FlSpot(
+                                  e.date.millisecondsSinceEpoch.toDouble(), 
+                                  _getDisplayWeight(e.weight!) // Convert for Chart
+                                ))
                                 .toList(),
                             isCurved: true,
                             color: Colors.green,
@@ -137,10 +175,14 @@ class _BodyMetricsScreenState extends State<BodyMetricsScreen> {
                   itemCount: data.length,
                   itemBuilder: (ctx, i) {
                     final entry = data[i];
+                    final displayWeight = entry.weight != null 
+                        ? "${_getDisplayWeight(entry.weight!).toStringAsFixed(1)} $unitLabel" 
+                        : '-';
+                        
                     return ListTile(
                       title: Text(DateFormat.yMMMd().format(entry.date)),
                       subtitle: Text(
-                        "Weight: ${entry.weight ?? '-'} lbs\n${entry.measurements.entries.map((e) => '${e.key}: ${e.value}"').join(', ')}"
+                        "Weight: $displayWeight\n${entry.measurements.entries.map((e) => '${e.key}: ${e.value}"').join(', ')}"
                       ),
                     );
                   },
