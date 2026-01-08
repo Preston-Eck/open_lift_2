@@ -11,10 +11,10 @@
 - **Local Data:** `sqflite` (Schema v13)
 - **AI:** Gemini 2.0 Flash (Plan Gen, Equipment Analysis)
 
-## 2. Database Schema (Version 13)
+## 2. Database Schema (Version 14)
 * **user_profile (Local)**: `id`, `birth_date`, `weight`, `height`, `gender`, `fitness_level`
-* **user_equipment**: `id`, `name`, `is_owned`, `capabilities_json`
-* **custom_exercises**: `id`, `name`, `category`, `muscles`, `equipment`
+* **user_equipment**: `id`, `name`, `is_owned`, `capabilities_json`, `last_updated`, `synced`
+* **custom_exercises**: `id`, `name`, `category`, `muscles`, `notes`, `equipment_json`, `last_updated`, `synced`
 * **workout_sessions**: `id`, `plan_id`, `start_time`, `end_time`
 * **workout_logs**: `id`, `session_id`, `exercise`, `weight`, `reps`
 * **workout_plans**: `id`, `name`, `schedule_json`
