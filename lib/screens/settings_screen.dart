@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/database_service.dart';
+import 'about_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -240,7 +241,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 label: const Text("Save Profile"),
                 style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50)),
                 onPressed: _saveSettings,
-              )
+              ),
+              const SizedBox(height: 40),
+              const Divider(),
+              ListTile(
+                leading: const Icon(Icons.info_outline, color: Colors.grey),
+                title: const Text("About & Licenses"),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AboutScreen())),
+              ),
+              const SizedBox(height: 20),
             ],
           ),
     );
