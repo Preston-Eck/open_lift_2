@@ -1,0 +1,13 @@
+dev_dependencies:
+  flutter_launcher_icons: "^0.13.1"
+
+flutter_launcher_icons:
+  android: "ic_launcher"
+  ios: true
+  image_path: "assets/icon/app_icon.png"
+  min_sdk_android: 21 # Match your build.gradle
+  remove_alpha_ios: true
+  
+  # Adaptive Icons for Android 8+ (Optional but recommended)
+  # adaptive_icon_background: "#2A9D8F" # Renewal Teal
+  # adaptive_icon_foreground: "assets/icon/app_icon_foreground.png"

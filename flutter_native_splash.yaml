@@ -1,0 +1,20 @@
+flutter_native_splash:
+  # 1. Background Color (Vitality Rise Teal)
+  color: "#2A9D8F"
+
+  # 2. Logo Image (Center)
+  # We reuse the high-res icon you created in the previous step.
+  # Ensure this file exists at this path.
+  image: "assets/icon/app_icon.png"
+
+  # 3. Android 12+ Support (Required for modern devices)
+  android_12:
+    image: "assets/icon/app_icon.png"
+    color: "#2A9D8F"
+    
+  # 4. Platform Specifics
+  android: true
+  ios: true
+  
+  # 5. Fullscreen Mode (Optional, usually looks cleaner)
+  fullscreen: true
