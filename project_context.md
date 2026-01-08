@@ -4,45 +4,42 @@
 **Name:** OpenLift 2
 **Goal:** Community-driven fitness tracker with cloud sync, social leaderboards, and AI coaching.
 **Version:** 1.0.2+3 (Release Candidate)
+**Status:** Post-Release / Hotfix Mode
 **Tech Stack:**
 - **Framework:** Flutter (Dart)
-- **State Management:** Provider
 - **Backend:** Supabase (Auth, Postgres, RPC, Storage)
-- **Local Data:** `sqflite` (Schema v13) - Syncs with Cloud & Isolated per User.
-- **AI:** Google Generative AI (Gemini 2.0 Flash) - RAG-enabled Plan Generation & Equipment Analysis.
+- **Local Data:** `sqflite` (Schema v13)
+- **AI:** Gemini 2.0 Flash (Plan Gen, Equipment Analysis)
 
 ## 2. Database Schema (Version 13)
-* **user_profile (Local)**: `id` (PK), `birth_date`, `current_weight`, `height`, `gender`, `fitness_level`
-* **user_equipment**: `id`, `name`, `is_owned`, `capabilities_json` (AI Tags)
-* **custom_exercises**: `id`, `name`, `category`, `primary_muscles`, `notes`, `equipment_json`
-* **workout_sessions**: `id` (UUID), `plan_id`, `day_name`, `start_time`, `end_time`, `note`
-* **workout_logs**: `id`, `session_id`, `exercise_name`, `weight`, `reps`, `volume_load`, `timestamp`, `duration`
-* **workout_plans**: `id`, `name`, `goal`, `type`, `schedule_json`, `last_updated`
-* **Cloud Tables (Supabase)**: `profiles`, `friendships`, `plans`, `logs`, `exercises` (Wiki).
+* **user_profile (Local)**: `id`, `birth_date`, `weight`, `height`, `gender`, `fitness_level`
+* **user_equipment**: `id`, `name`, `is_owned`, `capabilities_json`
+* **custom_exercises**: `id`, `name`, `category`, `muscles`, `equipment`
+* **workout_sessions**: `id`, `plan_id`, `start_time`, `end_time`
+* **workout_logs**: `id`, `session_id`, `exercise`, `weight`, `reps`
+* **workout_plans**: `id`, `name`, `schedule_json`
 
-## 3. Core Features Implemented
-1.  **Intelligent Gym (AI):** Separates "Physical Items" (e.g., Power Rack) from "Capabilities" (e.g., Squats) to prevent hallucinations.
-2.  **Smart Workout Player:** Displays 1RM history and provides "Smart Hints" for weight selection (75% 1RM or Progressive Overload).
-3.  **Fuzzy Search:** "Sit Ups" matches "Sit-Ups" in local and remote databases.
-4.  **Global Unit System:** Imperial/Metric toggle with on-the-fly conversion.
-5.  **Cloud Sync Engine:** Bi-directional sync with "Last Write Wins" logic; auto-syncs on critical actions.
-6.  **Social Hub:** Friend requests, public plan cloning, and Weekly Leaderboards.
+## 3. Critical Issues (Hotfix Priority)
+* **[CRITICAL] Sync Gap:** `SyncService` currently **only** syncs Plans and Logs. It fails to sync `user_equipment` and `custom_exercises`, causing data loss across devices.
+    * *Action:* Must implement `_pushEquipment`, `_pullEquipment`, `_pushCustomExercises` in `SyncService`.
 
-## 4. Key Services
-* `DatabaseService`: Handles CRUD and strictly separates `getOwnedEquipment` (Capabilities) from `getOwnedItemNames` (Inventory).
-* `GeminiService`: Enforces "Warm-up" mandates and strict equipment constraints via Prompt Engineering.
-* `SyncService`: Handles pushing/pulling data to Supabase.
-* `SocialService`: Manages friends, requests, and leaderboard data.
+## 4. Roadmap (v1.1.0 & Beyond)
+1.  **Gym Locations (Multi-Profile):**
+    * Allow users to define "Gym Profiles" (e.g., Home, Work, Brother's Gym).
+    * Link specific equipment lists to these profiles.
+    * Switching profiles automatically filters available exercises/plans.
+    * Allow users to share "Gym Profiles" with others.
+2.  **User Onboarding Checklist:**
+    * Dashboard widget guiding users: 1. Profile -> 2. Gym Setup -> 3. Create Plan.
+3.  **AI Coach Chatbot:**
+    * Conversational interface for fitness advice using RAG on user logs.
 
-## 5. Recent Wins & Lessons
-* **Prompt Engineering:** Learned that AI needs explicit distinction between "Tools" and "Actions" to avoid programming machines as exercises.
-* **UX Polish:** "Smart Hints" in text fields (semi-transparent suggestions) are cleaner than cluttering the UI with label text.
-* **Stability:** Moving async initialization (like UUID generation) out of `build()` methods prevents runtime `LateInitializationError` crashes.
-* **Linter Discipline:** Enforcing `prefer_collection_literals` and removing unused imports keeps the codebase maintainable.
-* **Search UX:** Custom `ExerciseSelectionDialog` provides a better experience than standard `Autocomplete` for mixed local/remote data.
+## 5. Recent Lessons
+* **Prompt Engineering:** AI requires explicit distinction between "Tools" (Machines) and "Actions" (Exercises).
+* **Deployment:** `accessibility_plugin.cc` errors on Windows are harmless noise.
+* **Data Safety:** Always verify "Sync" covers *all* new tables created during feature development.
 
-## 6. Next Objectives (v1.1.0)
-1.  **AI Coach Chatbot:** Interactive chat interface for ad-hoc advice.
-    * *Requirement:* New `chat_history` table.
-    * *Requirement:* RAG access to `workout_logs` for personalized answers.
-2.  **Workout History Analytics:** Scatter plot visualization of volume/intensity over time.
+## 6. Key Files
+* `lib/services/sync_service.dart` (Needs Update)
+* `lib/services/database_service.dart` (Source of Truth)
+* `lib/screens/equipment_manager_screen.dart` (UI for Equipment)
