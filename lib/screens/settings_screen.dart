@@ -17,10 +17,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _feetController = TextEditingController();
   final _inchesController = TextEditingController();
   final _weightController = TextEditingController();
-  
+
   String _gender = 'Male';
   String _fitnessLevel = 'Intermediate';
-  String _unitSystem = 'Imperial'; 
+  String _unitSystem = 'Imperial';
   bool _isLoading = true;
 
   @override
@@ -69,7 +69,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _saveSettings() async {
     final db = context.read<DatabaseService>();
     final prefs = await SharedPreferences.getInstance();
-    
+
     await prefs.setString('units', _unitSystem);
 
     double? weightToStore;
@@ -103,7 +103,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Profile Saved!"))
+          const SnackBar(content: Text("Profile Saved!"))
       );
     }
   }
@@ -111,7 +111,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void _toggleUnits(int index) {
     setState(() {
       String newSystem = index == 0 ? 'Imperial' : 'Metric';
-      if (_unitSystem == newSystem) return; 
+      if (_unitSystem == newSystem) return;
 
       double currentVal = double.tryParse(_weightController.text) ?? 0;
       if (currentVal > 0) {
@@ -144,115 +144,116 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     return Scaffold(
       appBar: AppBar(title: const Text("User Profile & Settings")),
-      body: _isLoading 
-        ? const Center(child: CircularProgressIndicator()) 
-        : ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              Center(
-                child: ToggleButtons(
-                  isSelected: [_unitSystem == 'Imperial', _unitSystem == 'Metric'],
-                  onPressed: _toggleUnits,
-                  borderRadius: BorderRadius.circular(8),
-                  children: const [
-                    Padding(padding: EdgeInsets.symmetric(horizontal: 24), child: Text("Imperial")),
-                    Padding(padding: EdgeInsets.symmetric(horizontal: 24), child: Text("Metric")),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 20),
-
-              const Text("Personal Stats", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 10),
-
-              TextField(
-                controller: _ageController,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: "Age", border: OutlineInputBorder()),
-              ),
-              const SizedBox(height: 10),
-              
-              if (isMetric)
-                TextField(
-                  controller: _heightCmController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: "Height (cm)", border: OutlineInputBorder()),
-                )
-              else
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _feetController,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(labelText: "Height (Ft)", border: OutlineInputBorder()),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: TextField(
-                        controller: _inchesController,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(labelText: "Height (In)", border: OutlineInputBorder()),
-                      ),
-                    ),
-                  ],
-                ),
-              const SizedBox(height: 10),
-
-              TextField(
-                controller: _weightController,
-                keyboardType: TextInputType.number,
-                decoration: InputDecoration(
-                  labelText: isMetric ? "Weight (kg)" : "Weight (lbs)", 
-                  border: const OutlineInputBorder()
-                ),
-              ),
-              const SizedBox(height: 10),
-
-              InputDecorator(
-                decoration: const InputDecoration(labelText: "Gender", border: OutlineInputBorder()),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    value: ['Male', 'Female', 'Other'].contains(_gender) ? _gender : 'Male',
-                    isDense: true,
-                    items: ['Male', 'Female', 'Other'].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-                    onChanged: (val) => setState(() => _gender = val!),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-
-              InputDecorator(
-                decoration: const InputDecoration(labelText: "Fitness Level", border: OutlineInputBorder()),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    value: ['Beginner', 'Intermediate', 'Advanced', 'Elite'].contains(_fitnessLevel) ? _fitnessLevel : 'Intermediate',
-                    isDense: true,
-                    items: ['Beginner', 'Intermediate', 'Advanced', 'Elite'].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-                    onChanged: (val) => setState(() => _fitnessLevel = val!),
-                  ),
-                ),
-              ),
-              
-              const SizedBox(height: 30),
-              ElevatedButton.icon(
-                icon: const Icon(Icons.save),
-                label: const Text("Save Profile"),
-                style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50)),
-                onPressed: _saveSettings,
-              ),
-              const SizedBox(height: 40),
-              const Divider(),
-              ListTile(
-                leading: const Icon(Icons.info_outline, color: Colors.grey),
-                title: const Text("About & Licenses"),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AboutScreen())),
-              ),
-              const SizedBox(height: 20),
-            ],
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Center(
+            child: ToggleButtons(
+              isSelected: [_unitSystem == 'Imperial', _unitSystem == 'Metric'],
+              onPressed: _toggleUnits,
+              borderRadius: BorderRadius.circular(8),
+              children: const [
+                Padding(padding: EdgeInsets.symmetric(horizontal: 24), child: Text("Imperial")),
+                Padding(padding: EdgeInsets.symmetric(horizontal: 24), child: Text("Metric")),
+              ],
+            ),
           ),
+          const SizedBox(height: 20),
+
+          const Text("Personal Stats", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
+
+          TextField(
+            controller: _ageController,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(labelText: "Age", border: OutlineInputBorder()),
+          ),
+          const SizedBox(height: 10),
+
+          if (isMetric)
+            TextField(
+              controller: _heightCmController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: "Height (cm)", border: OutlineInputBorder()),
+            )
+          else
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _feetController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: "Height (Ft)", border: OutlineInputBorder()),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: _inchesController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: "Height (In)", border: OutlineInputBorder()),
+                  ),
+                ),
+              ],
+            ),
+          const SizedBox(height: 10),
+
+          TextField(
+            controller: _weightController,
+            keyboardType: TextInputType.number,
+            decoration: InputDecoration(
+                labelText: isMetric ? "Weight (kg)" : "Weight (lbs)",
+                border: const OutlineInputBorder()
+            ),
+          ),
+          const SizedBox(height: 10),
+
+          InputDecorator(
+            decoration: const InputDecoration(labelText: "Gender", border: OutlineInputBorder()),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: ['Male', 'Female', 'Other'].contains(_gender) ? _gender : 'Male',
+                isDense: true,
+                items: ['Male', 'Female', 'Other'].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+                onChanged: (val) => setState(() => _gender = val!),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+
+          InputDecorator(
+            decoration: const InputDecoration(labelText: "Fitness Level", border: OutlineInputBorder()),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: ['Beginner', 'Intermediate', 'Advanced', 'Elite'].contains(_fitnessLevel) ? _fitnessLevel : 'Intermediate',
+                isDense: true,
+                items: ['Beginner', 'Intermediate', 'Advanced', 'Elite'].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+                onChanged: (val) => setState(() => _fitnessLevel = val!),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 30),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.save),
+            label: const Text("Save Profile"),
+            style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50)),
+            onPressed: _saveSettings,
+          ),
+
+          const SizedBox(height: 40),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.info_outline, color: Colors.grey),
+            title: const Text("About & Licenses"),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AboutScreen())),
+          ),
+          const SizedBox(height: 20),
+        ],
+      ),
     );
   }
 }

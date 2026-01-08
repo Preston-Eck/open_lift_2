@@ -1,10 +1,10 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/database_service.dart';
-import '../services/gemini_service.dart';
 import '../models/exercise.dart';
+import '../config/equipment_bundles.dart';
+import '../theme.dart';
 
 class EquipmentManagerScreen extends StatefulWidget {
   const EquipmentManagerScreen({super.key});
@@ -13,17 +13,18 @@ class EquipmentManagerScreen extends StatefulWidget {
   State<EquipmentManagerScreen> createState() => _EquipmentManagerScreenState();
 }
 
-class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> {
-  final TextEditingController _nameController = TextEditingController();
-  List<String> _aiDetectedTags = []; 
-  bool _isAnalyzing = false;
+class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
   bool _isLoading = true;
-
-  List<Map<String, dynamic>> _ownedItems = [];
+  
+  // Data
+  Set<String> _ownedStandardItems = {};
+  List<Map<String, dynamic>> _customItems = [];
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     _loadData();
   }
 
@@ -31,10 +32,26 @@ class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> {
     if (!mounted) return;
     final db = context.read<DatabaseService>();
     try {
-      final items = await db.getUserEquipmentList();
+      final allItems = await db.getUserEquipmentList();
+      
+      final Set<String> standardSet = {};
+      final List<Map<String, dynamic>> customList = [];
+
+      for (var item in allItems) {
+        final name = item['name'] as String;
+        final isOwned = (item['is_owned'] as int) == 1;
+
+        if (allGenericEquipment.contains(name)) {
+          if (isOwned) standardSet.add(name);
+        } else if (isOwned) {
+          customList.add(item);
+        }
+      }
+
       if (mounted) {
         setState(() {
-          _ownedItems = List.from(items);
+          _ownedStandardItems = standardSet;
+          _customItems = customList;
           _isLoading = false;
         });
       }
@@ -43,188 +60,211 @@ class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> {
     }
   }
 
-  Future<void> _saveNewItem() async {
-    if (!mounted) return;
-    final db = context.read<DatabaseService>();
-    final name = _nameController.text;
-    if (name.isEmpty) return;
-
-    await db.updateEquipmentCapabilities(name, _aiDetectedTags);
-    
-    if (mounted) {
-      setState(() {
-        _nameController.clear();
-        _aiDetectedTags = [];
-      });
-      await _loadData(); // Refresh list
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Added $name!")));
+  void _toggleStandardItem(String name, bool value) async {
+    setState(() {
+      if (value) {
+        _ownedStandardItems.add(name);
+      } else {
+        _ownedStandardItems.remove(name);
       }
-    }
+    });
+    // Fire and forget DB update
+    await context.read<DatabaseService>().updateEquipment(name, value);
   }
 
-  void _openEditor(Map<String, dynamic> item) async {
-    // STABILITY FIX: Use full screen navigation instead of Dialogs
+  void _openCustomEditor([Map<String, dynamic>? item]) async {
     await Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => EquipmentEditorScreen(item: item)),
+      MaterialPageRoute(builder: (_) => ComplexEquipmentEditor(item: item)),
     );
-    _loadData(); // Refresh on return
+    _loadData();
   }
 
   @override
   Widget build(BuildContext context) {
-    final gemini = Provider.of<GeminiService>(context, listen: false);
-
     return Scaffold(
-      appBar: AppBar(title: const Text("Manage Equipment")),
+      appBar: AppBar(
+        title: const Text("Manage Equipment"),
+        bottom: TabBar(
+          controller: _tabController,
+          labelColor: AppTheme.renewalTeal,
+          unselectedLabelColor: Colors.grey,
+          indicatorColor: AppTheme.renewalTeal,
+          tabs: const [
+            Tab(text: "Standard Checklist"),
+            Tab(text: "Custom & Machines"),
+          ],
+        ),
+      ),
       body: _isLoading 
         ? const Center(child: CircularProgressIndicator()) 
-        : SingleChildScrollView( 
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              children: [
-                _buildAddCustomSection(gemini),
-                const Divider(height: 30),
-                if (_ownedItems.isEmpty)
-                  const Center(child: Text("Your gym is empty.", style: TextStyle(color: Colors.grey))),
-                
-                ..._ownedItems.map((item) {
-                  final tagsJson = item['capabilities_json'];
-                  final tags = tagsJson != null ? List<String>.from(jsonDecode(tagsJson)) : <String>[];
-                  
-                  return Card(
-                    key: ValueKey("eq_${item['name']}"), 
-                    margin: const EdgeInsets.only(bottom: 8),
-                    child: ListTile(
-                      title: Text(item['name'], style: const TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: Text(tags.take(5).join(", ") + (tags.length > 5 ? "..." : ""), style: const TextStyle(fontSize: 12)),
-                      onTap: () => _openEditor(item), // Tap whole row to edit
-                      trailing: IconButton(
-                        icon: const Icon(Icons.delete, color: Colors.red),
-                        onPressed: () async {
-                          await context.read<DatabaseService>().updateEquipment(item['name'], false);
-                          _loadData();
-                        },
-                      ),
-                    ),
-                  );
-                }),
-                const SizedBox(height: 40),
-              ],
-            ),
+        : TabBarView(
+            controller: _tabController,
+            children: [
+              _buildStandardTab(),
+              _buildCustomTab(),
+            ],
           ),
     );
   }
 
-  Widget _buildAddCustomSection(GeminiService gemini) {
-    return Card(
-      color: Colors.grey[100],
-      child: Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text("Add New Gear", style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _nameController,
-              decoration: const InputDecoration(labelText: "Name (e.g. Power Rack)", border: OutlineInputBorder(), isDense: true),
+  Widget _buildStandardTab() {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        const Card(
+          color: AppTheme.clarityCream,
+          child: Padding(
+            padding: EdgeInsets.all(12.0),
+            child: Text(
+              "Select individual items you own. These are automatically used by the AI Coach.",
+              style: TextStyle(fontSize: 14, color: AppTheme.foundationalSlate),
             ),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                icon: _isAnalyzing 
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) 
-                  : const Icon(Icons.auto_awesome),
-                label: const Text("Analyze & Add"),
-                onPressed: _isAnalyzing ? null : () async {
-                   if (_nameController.text.isEmpty) return;
-                   setState(() => _isAnalyzing = true);
-                   try {
-                     final tags = await gemini.analyzeEquipment(_nameController.text);
-                     if (mounted) {
-                       setState(() {
-                         _aiDetectedTags = tags;
-                         _isAnalyzing = false;
-                       });
-                       await _saveNewItem();
-                     }
-                   } catch (e) {
-                     if (mounted) setState(() => _isAnalyzing = false);
-                   }
-                },
-              ),
-            )
-          ],
+          ),
         ),
+        const SizedBox(height: 16),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: allGenericEquipment.map((tag) {
+            final isSelected = _ownedStandardItems.contains(tag);
+            return FilterChip(
+              label: Text(tag),
+              selected: isSelected,
+              selectedColor: AppTheme.renewalTeal.withValues(alpha: 0.2),
+              checkmarkColor: AppTheme.renewalTeal,
+              onSelected: (val) => _toggleStandardItem(tag, val),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCustomTab() {
+    return Scaffold(
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _openCustomEditor(),
+        label: const Text("Add Custom Gear"),
+        icon: const Icon(Icons.add),
+        backgroundColor: AppTheme.motivationCoral,
+        foregroundColor: Colors.white,
       ),
+      body: _customItems.isEmpty
+          ? const Center(child: Text("No custom equipment added.\nUse this for Home Gyms, Machines, etc.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)))
+          : ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: _customItems.length,
+              itemBuilder: (context, index) {
+                final item = _customItems[index];
+                final tagsJson = item['capabilities_json'];
+                final tags = tagsJson != null ? List<String>.from(jsonDecode(tagsJson)) : <String>[];
+
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  child: ListTile(
+                    title: Text(item['name'], style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text(
+                      tags.isEmpty ? "No capabilities set" : "Enable: ${tags.take(4).join(', ')}${tags.length > 4 ? '...' : ''}",
+                      maxLines: 1, 
+                      overflow: TextOverflow.ellipsis
+                    ),
+                    trailing: const Icon(Icons.edit, size: 20, color: Colors.grey),
+                    onTap: () => _openCustomEditor(item),
+                  ),
+                );
+              },
+            ),
     );
   }
 }
 
-// --- FULL SCREEN EDITOR (STABLE) ---
-class EquipmentEditorScreen extends StatefulWidget {
-  final Map<String, dynamic> item;
-  const EquipmentEditorScreen({super.key, required this.item});
+class ComplexEquipmentEditor extends StatefulWidget {
+  final Map<String, dynamic>? item;
+  const ComplexEquipmentEditor({super.key, this.item});
 
   @override
-  State<EquipmentEditorScreen> createState() => _EquipmentEditorScreenState();
+  State<ComplexEquipmentEditor> createState() => _ComplexEquipmentEditorState();
 }
 
-class _EquipmentEditorScreenState extends State<EquipmentEditorScreen> {
-  late List<String> _tags;
+class _ComplexEquipmentEditorState extends State<ComplexEquipmentEditor> {
+  final _nameController = TextEditingController();
+  final Set<String> _selectedCapabilities = {};
+  
+  // Separate list for specific exercises that are NOT standard tags
+  final List<String> _specificExercises = []; 
 
   @override
   void initState() {
     super.initState();
-    final json = widget.item['capabilities_json'];
-    _tags = json != null ? List<String>.from(jsonDecode(json)) : [];
-    if (_tags.isEmpty) _tags.add(widget.item['name']);
-  }
-
-  Future<void> _save() async {
-    final db = context.read<DatabaseService>();
-    await db.updateEquipmentCapabilities(widget.item['name'], _tags);
-    if (mounted) Navigator.pop(context);
-  }
-
-  Future<void> _linkExercise() async {
-    // Navigate to Search Screen
-    final Exercise? result = await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const EquipmentSearchScreen()),
-    );
-
-    if (result != null) {
-      setState(() {
-        for (var t in result.equipment) {
-          if (!_tags.contains(t)) _tags.add(t);
+    if (widget.item != null) {
+      _nameController.text = widget.item!['name'];
+      final json = widget.item!['capabilities_json'];
+      if (json != null) {
+        final List<String> allTags = List<String>.from(jsonDecode(json));
+        
+        for (var tag in allTags) {
+          if (allGenericEquipment.contains(tag)) {
+            _selectedCapabilities.add(tag);
+          } else if (tag != widget.item!['name']) {
+            // It's a specific exercise or custom tag
+            _specificExercises.add(tag);
+          }
         }
-        if (!_tags.contains(result.name)) _tags.add(result.name); // Add exercise name itself if equipment list is empty
-      });
+      }
     }
   }
 
-  void _addManualTag() {
-    // Simple dialogs for text input are usually fine, but let's be safe
-    final textC = TextEditingController();
-    showDialog(
+  Future<void> _save() async {
+    if (_nameController.text.isEmpty) return;
+
+    final db = context.read<DatabaseService>();
+    
+    // Combine standard caps + specific exercises into one list for the DB
+    final List<String> finalCapabilities = [
+      ..._selectedCapabilities,
+      ..._specificExercises,
+      _nameController.text // Include self
+    ].toSet().toList(); // De-dupe
+
+    await db.updateEquipmentCapabilities(_nameController.text, finalCapabilities);
+    if (mounted) Navigator.pop(context);
+  }
+
+  Future<void> _delete() async {
+    if (widget.item != null) {
+      await context.read<DatabaseService>().updateEquipment(widget.item!['name'], false);
+    }
+    if (mounted) Navigator.pop(context);
+  }
+
+  Future<void> _addSpecificExercise() async {
+    // This assumes EquipmentSearchScreen from a previous iteration is available or needs to be included.
+    // If it was lost, we need to add it back to this file or import it.
+    // For now, I will include a basic Search Dialog here to keep it self-contained.
+    
+    // Using a simpler approach than navigating to a full screen for now to reduce dependency complexity
+    final controller = TextEditingController();
+    await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("Add Tag"),
-        content: TextField(controller: textC, autofocus: true),
+        title: const Text("Add Specific Exercise"),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(hintText: "e.g. Lat Pulldown"),
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
           ElevatedButton(
             onPressed: () {
-              if (textC.text.isNotEmpty) {
-                setState(() => _tags.add(textC.text));
-              }
-              Navigator.pop(ctx);
-            }, 
-            child: const Text("Add")
+               if (controller.text.isNotEmpty) {
+                 Navigator.pop(ctx);
+                 setState(() {
+                   _specificExercises.add(controller.text);
+                 });
+               }
+            },
+            child: const Text("Add"),
           )
         ],
       )
@@ -235,9 +275,11 @@ class _EquipmentEditorScreenState extends State<EquipmentEditorScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text("Edit ${widget.item['name']}"),
+        title: Text(widget.item == null ? "Add Custom Gear" : "Edit Gear"),
         actions: [
-          IconButton(icon: const Icon(Icons.save), onPressed: _save)
+          if (widget.item != null)
+            IconButton(icon: const Icon(Icons.delete, color: AppTheme.errorRed), onPressed: _delete),
+          IconButton(icon: const Icon(Icons.save), onPressed: _save),
         ],
       ),
       body: SingleChildScrollView(
@@ -245,112 +287,81 @@ class _EquipmentEditorScreenState extends State<EquipmentEditorScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text("Capabilities define what exercises this machine can perform.", style: TextStyle(color: Colors.grey)),
-            const SizedBox(height: 20),
-            
-            const Text("Current Tags", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            TextField(
+              controller: _nameController,
+              decoration: const InputDecoration(
+                labelText: "Equipment Name", 
+                hintText: "e.g. Major Lutie Power Cage",
+                border: OutlineInputBorder()
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // 1. Standard Capabilities
+            const Text("What functions does this provide?", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            const SizedBox(height: 8),
+            const Text("Select standard equipment that this machine replaces or includes.", style: TextStyle(color: Colors.grey, fontSize: 12)),
             const SizedBox(height: 10),
             Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: _tags.map((t) => Chip(
-                label: Text(t),
-                deleteIcon: const Icon(Icons.close, size: 18),
-                onDeleted: () => setState(() => _tags.remove(t)),
-              )).toList(),
+              children: allGenericEquipment.map((tag) {
+                final isSelected = _selectedCapabilities.contains(tag);
+                return FilterChip(
+                  label: Text(tag),
+                  selected: isSelected,
+                  onSelected: (val) {
+                    setState(() {
+                      if (val) _selectedCapabilities.add(tag);
+                      else _selectedCapabilities.remove(tag);
+                    });
+                  },
+                );
+              }).toList(),
             ),
-            
+
             const SizedBox(height: 30),
-            const Divider(),
+
+            // 2. Specific Exercises
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text("Specific Exercises", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                TextButton.icon(
+                  onPressed: _addSpecificExercise, 
+                  icon: const Icon(Icons.add), 
+                  label: const Text("Add")
+                ),
+              ],
+            ),
+            const Text("Add exercises you know can be performed on this machine.", style: TextStyle(color: Colors.grey, fontSize: 12)),
             const SizedBox(height: 10),
             
-            const Text("Add Capabilities", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            const SizedBox(height: 10),
-            ListTile(
-              leading: const CircleAvatar(child: Icon(Icons.edit)),
-              title: const Text("Manual Entry"),
-              subtitle: const Text("Type a capability tag manually"),
-              onTap: _addManualTag,
-            ),
-            ListTile(
-              leading: const CircleAvatar(child: Icon(Icons.search)),
-              title: const Text("Infer from Exercise"),
-              subtitle: const Text("Search an exercise (e.g. 'Lat Pulldown') to auto-add its tags"),
-              onTap: _linkExercise,
-            ),
+            if (_specificExercises.isEmpty)
+              Container(
+                padding: const EdgeInsets.all(16),
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
+                  borderRadius: BorderRadius.circular(8)
+                ),
+                child: const Text("No specific exercises linked.", style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic)),
+              )
+            else
+              ..._specificExercises.map((exName) => Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: ListTile(
+                  dense: true,
+                  title: Text(exName),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.close, size: 16),
+                    onPressed: () => setState(() => _specificExercises.remove(exName)),
+                  ),
+                ),
+              )),
           ],
         ),
       ),
-    );
-  }
-}
-
-// --- FULL SCREEN SEARCH (STABLE) ---
-class EquipmentSearchScreen extends StatefulWidget {
-  const EquipmentSearchScreen({super.key});
-
-  @override
-  State<EquipmentSearchScreen> createState() => _EquipmentSearchScreenState();
-}
-
-class _EquipmentSearchScreenState extends State<EquipmentSearchScreen> {
-  final TextEditingController _ctrl = TextEditingController();
-  List<Exercise> _results = [];
-  bool _searching = false;
-
-  Future<void> _doSearch() async {
-    if (_ctrl.text.isEmpty) return;
-    setState(() => _searching = true);
-    
-    try {
-      final data = await Supabase.instance.client
-          .from('exercises')
-          .select()
-          .ilike('name', '%${_ctrl.text}%')
-          .limit(15);
-      
-      if (mounted) {
-        setState(() {
-          _results = (data as List).map((e) => Exercise.fromJson(e)).toList();
-          _searching = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) setState(() => _searching = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: TextField(
-          controller: _ctrl,
-          autofocus: true,
-          decoration: const InputDecoration(
-            hintText: "Search Exercise...",
-            border: InputBorder.none,
-          ),
-          onSubmitted: (_) => _doSearch(),
-        ),
-        actions: [
-          IconButton(icon: const Icon(Icons.search), onPressed: _doSearch)
-        ],
-      ),
-      body: _searching 
-        ? const LinearProgressIndicator() 
-        : ListView.separated(
-            itemCount: _results.length,
-            separatorBuilder: (_, __) => const Divider(height: 1),
-            itemBuilder: (ctx, i) {
-              final ex = _results[i];
-              return ListTile(
-                title: Text(ex.name),
-                subtitle: Text(ex.equipment.join(", ")),
-                onTap: () => Navigator.pop(context, ex),
-              );
-            },
-          ),
     );
   }
 }

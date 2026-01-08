@@ -12,7 +12,6 @@ class DatabaseService extends ChangeNotifier {
   Database? _db;
   String? _currentUserId;
 
-  /// Sets the active user ID. If it changes, we close the old DB.
   Future<void> setUserId(String? userId) async {
     if (_currentUserId == userId) return;
     _currentUserId = userId;
@@ -104,6 +103,62 @@ class DatabaseService extends ChangeNotifier {
     } catch (e) {
       debugPrint("Cleanup Error: $e");
     }
+  }
+
+  // --- EQUIPMENT ---
+
+  // REPLACED: Handles simple toggles for standard equipment
+  Future<void> updateEquipment(String name, bool isOwned) async { 
+    final db = await database; 
+    final existing = await db.query('user_equipment', where: 'id = ?', whereArgs: [name]);
+    
+    if (existing.isNotEmpty) {
+      await db.update('user_equipment', {'is_owned': isOwned ? 1 : 0}, where: 'id = ?', whereArgs: [name]);
+    } else {
+      // Default capability is itself (e.g. Barbell has capability [Barbell])
+      await db.insert('user_equipment', {
+        'id': name, 
+        'name': name, 
+        'is_owned': isOwned ? 1 : 0,
+        'capabilities_json': jsonEncode([name]) 
+      });
+    }
+    notifyListeners(); 
+  }
+
+  Future<void> updateEquipmentCapabilities(String name, List<String> capabilities) async {
+    final db = await database;
+    await db.insert('user_equipment', {
+      'id': name,
+      'name': name,
+      'is_owned': 1,
+      'capabilities_json': jsonEncode(capabilities),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    notifyListeners();
+  }
+
+  Future<List<String>> getOwnedEquipment() async {
+    final db = await database;
+    final res = await db.query('user_equipment', where: 'is_owned = 1');
+    final Set<String> capabilities = {};
+    for (var row in res) {
+      capabilities.add(row['name'] as String);
+      if (row['capabilities_json'] != null) {
+        try {
+          final List<dynamic> tags = jsonDecode(row['capabilities_json'] as String);
+          capabilities.addAll(tags.map((e) => e.toString()));
+        } catch (e) {
+          debugPrint("Error parsing capabilities for ${row['name']}: $e");
+        }
+      }
+    }
+    return capabilities.toList();
+  }
+
+  // UPDATED: Returns everything so the UI can decide what to show
+  Future<List<Map<String, dynamic>>> getUserEquipmentList() async {
+    final db = await database;
+    return await db.query('user_equipment');
   }
 
   // --- USER PROFILE ---
@@ -236,55 +291,6 @@ class DatabaseService extends ChangeNotifier {
 
   Future<List<WorkoutPlan>> getPlans() async { final db = await database; final res = await db.query('workout_plans'); return res.map((e) => WorkoutPlan.fromMap(e)).toList(); }
   Future<void> deletePlan(String id) async { final db = await database; await db.delete('workout_plans', where: 'id = ?', whereArgs: [id]); notifyListeners(); }
-  
-  // --- EQUIPMENT ---
-  Future<void> updateEquipment(String name, bool isOwned) async { 
-    final db = await database; 
-    final existing = await db.query('user_equipment', where: 'id = ?', whereArgs: [name]);
-    
-    if (existing.isNotEmpty) {
-      await db.update('user_equipment', {'is_owned': isOwned ? 1 : 0}, where: 'id = ?', whereArgs: [name]);
-    } else {
-      await db.insert('user_equipment', {'id': name, 'name': name, 'is_owned': isOwned ? 1 : 0});
-    }
-    notifyListeners(); 
-  }
-
-  Future<void> updateEquipmentCapabilities(String name, List<String> capabilities) async {
-    final db = await database;
-    await db.insert('user_equipment', {
-      'id': name,
-      'name': name,
-      'is_owned': 1,
-      'capabilities_json': jsonEncode(capabilities),
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
-    notifyListeners();
-  }
-
-  Future<List<String>> getOwnedEquipment() async {
-    final db = await database;
-    final res = await db.query('user_equipment', where: 'is_owned = 1');
-    final Set<String> capabilities = {};
-    for (var row in res) {
-      capabilities.add(row['name'] as String);
-      if (row['capabilities_json'] != null) {
-        try {
-          final List<dynamic> tags = jsonDecode(row['capabilities_json'] as String);
-          capabilities.addAll(tags.map((e) => e.toString()));
-        } catch (e) {
-          debugPrint("Error parsing capabilities for ${row['name']}: $e");
-        }
-      }
-    }
-    return capabilities.toList();
-  }
-
-  /// NEW: Returns full equipment objects for the Manager UI
-  Future<List<Map<String, dynamic>>> getUserEquipmentList() async {
-    final db = await database;
-    // Return all, let UI filter by 'is_owned' if needed, or just owned.
-    return await db.query('user_equipment', where: 'is_owned = 1');
-  }
   
   // --- BODY METRICS ---
   Future<void> logBodyMetric(BodyMetric metric) async { 

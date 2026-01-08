@@ -38,3 +38,7 @@
 * **Data Seeding:** Created `full_seeder.py` to upload 800+ images and `ai_tagger.py` to auto-tag equipment requirements using Gemini.
 * **Type Safety:** Fixed `Map<String, dynamic>` runtime errors in AI Service by enforcing strict String conversion.
 * **Migration Strategy:** Used `on_conflict` upserts to safely hydrate the production DB without duplicates.
+* **Release Prep:** Configured `flutter_launcher_icons` and `flutter_native_splash`. Bumped version to `1.0.2+3`.
+* **Dependency Resolution:** Fixed conflict between `sqflite_common_ffi` and `package_info_plus` by upgrading the latter to `^9.0.0`.
+* **Asset Management:** Learned that assets used in `flutter_native_splash` (build-time) must *also* be declared in `pubspec.yaml` if they are used in-app (runtime widgets like About Screen).
+* **Release Build:** Validated `flutter build apk --release` generates a stable artifact.

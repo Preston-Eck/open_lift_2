@@ -3,8 +3,6 @@ flutter_native_splash:
   color: "#2A9D8F"
 
   # 2. Logo Image (Center)
-  # We reuse the high-res icon you created in the previous step.
-  # Ensure this file exists at this path.
   image: "assets/icon/app_icon.png"
 
   # 3. Android 12+ Support (Required for modern devices)
