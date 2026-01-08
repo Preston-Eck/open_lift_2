@@ -107,7 +107,6 @@ class DatabaseService extends ChangeNotifier {
 
   // --- EQUIPMENT ---
 
-  // REPLACED: Handles simple toggles for standard equipment
   Future<void> updateEquipment(String name, bool isOwned) async { 
     final db = await database; 
     final existing = await db.query('user_equipment', where: 'id = ?', whereArgs: [name]);
@@ -115,7 +114,6 @@ class DatabaseService extends ChangeNotifier {
     if (existing.isNotEmpty) {
       await db.update('user_equipment', {'is_owned': isOwned ? 1 : 0}, where: 'id = ?', whereArgs: [name]);
     } else {
-      // Default capability is itself (e.g. Barbell has capability [Barbell])
       await db.insert('user_equipment', {
         'id': name, 
         'name': name, 
@@ -137,6 +135,7 @@ class DatabaseService extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Used by AI: Returns capabilities (e.g., "Lat Pulldown") AND Item Names
   Future<List<String>> getOwnedEquipment() async {
     final db = await database;
     final res = await db.query('user_equipment', where: 'is_owned = 1');
@@ -155,7 +154,13 @@ class DatabaseService extends ChangeNotifier {
     return capabilities.toList();
   }
 
-  // UPDATED: Returns everything so the UI can decide what to show
+  // NEW: Used by Home Screen: Returns ONLY item names (e.g. "Power Rack")
+  Future<List<String>> getOwnedItemNames() async {
+    final db = await database;
+    final res = await db.query('user_equipment', where: 'is_owned = 1');
+    return res.map((row) => row['name'] as String).toList();
+  }
+
   Future<List<Map<String, dynamic>>> getUserEquipmentList() async {
     final db = await database;
     return await db.query('user_equipment');
@@ -268,6 +273,18 @@ class DatabaseService extends ChangeNotifier {
     final db = await database;
     final res = await db.query('workout_logs', where: 'exercise_name = ?', whereArgs: [exerciseName], orderBy: 'timestamp DESC');
     return res.map((e) => LogEntry.fromMap(e)).toList();
+  }
+
+  Future<LogEntry?> getLastLogForExercise(String exerciseName) async {
+    final db = await database;
+    final res = await db.query('workout_logs', 
+      where: 'exercise_name = ?', 
+      whereArgs: [exerciseName], 
+      orderBy: 'timestamp DESC',
+      limit: 1
+    );
+    if (res.isNotEmpty) return LogEntry.fromMap(res.first);
+    return null;
   }
 
   // --- CORE FEATURES ---

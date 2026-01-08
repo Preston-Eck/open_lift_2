@@ -31,7 +31,9 @@ class _AddExerciseScreenState extends State<AddExerciseScreen> {
       );
 
       Provider.of<DatabaseService>(context, listen: false).addCustomExercise(newExercise);
-      Navigator.pop(context);
+      
+      // Return the name so the previous screen can use it
+      Navigator.pop(context, newExercise.name); 
     }
   }
 

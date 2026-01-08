@@ -31,29 +31,56 @@ class GeminiService {
     String strengthStats,
     List<String> validExercises,
   ) async {
+    // CHANGED: Completely overhauled prompt to enforce strict equipment rules
     final prompt = '''
-      Create a $daysPerWeek-day/week workout plan.
-      Goal: $goal.
-      Session Duration: Approx $duration minutes.
+      You are an expert Strength & Conditioning Coach. Create a $daysPerWeek-day/week workout plan.
       
-      User Profile: ${userProfile.toString()}
-      Strength Stats: $strengthStats
-      Available Equipment: ${equipment.isEmpty ? "Bodyweight only" : equipment.join(', ')}.
+      === CONTEXT ===
+      GOAL: $goal.
+      DURATION: Approx $duration minutes per session.
+      USER PROFILE: ${userProfile.toString()}
+      STRENGTH STATS: $strengthStats
+      
+      === INVENTORY (CRITICAL) ===
+      AVAILABLE TOOLS & CAPABILITIES: ${equipment.isEmpty ? "Bodyweight only" : equipment.join(', ')}.
+      
+      *** STRICT RULES FOR EQUIPMENT USAGE ***
+      1. **VALIDATION:** You may ONLY program an exercise if the user explicitly has the required tool in the list above.
+         - If "Barbell" is NOT listed, you CANNOT program Barbell Squats, Bench Press, etc.
+         - If "Cable" is NOT listed, you CANNOT program Cable Flys or Tricep Pushdowns.
+         - "Bodyweight" is always available.
+      
+      2. **MACHINE IDENTIFICATION:** The list contains Model Names (e.g., "SincMill SCM-1160", "Bowflex"). 
+         - **NEVER** use a Model Name as the "name" of an exercise. 
+         - Instead, use the standard movement that machine allows (e.g., use "Lat Pulldown", NOT "SincMill SCM-1160").
+         - If a specific machine is listed, assume the user can perform standard exercises associated with it (e.g. Power Cage = Squats, Pull-ups).
 
-      Use these known exercise names where possible (but you can use others if needed):
-      ${validExercises.take(50).join(', ')}...
+      3. **SUBSTITUTIONS:** If the user lacks a tool (e.g. No Barbell), you MUST substitute with an available tool (e.g. Dumbbell Squat).
 
+      === PROGRAM STRUCTURE ===
+      1. **Warm-up:** Every session MUST start with a "Warm-up & Mobility" section (5-10 mins).
+      2. **Selection:** Use standard, proven exercises. Prioritize compound movements first.
+      3. **Progression:** Ensure the volume/intensity fits the user's fitness level.
+
+      === OUTPUT ===
       Return ONLY valid JSON with this structure (Array of Days):
       [
         {
-          "day_name": "Day 1 - Chest Focus",
+          "day_name": "Day 1 - Upper Body Focus",
           "exercises": [
             {
-              "name": "Barbell Bench Press",
+              "name": "Cat-Cow Stretch",
+              "sets": 1,
+              "reps": "60 sec",
+              "rest": 0,
+              "notes": "Mobility Warm-up"
+            },
+            {
+              "name": "Dumbbell Bench Press",
               "sets": 3,
               "reps": "8-12",
               "rest": 60,
-              "notes": "Keep elbows tucked"
+              "notes": "Control the eccentric"
             }
           ]
         }
@@ -134,7 +161,6 @@ class GeminiService {
     List<String> existingExerciseNames,
     List<String> fullInventory 
   ) async {
-    // ✅ INCREASED LIMIT: Changed from "5" to "20"
     final prompt = '''
       The user explicitly owns the following equipment tags: ${fullInventory.join(', ')}.
       

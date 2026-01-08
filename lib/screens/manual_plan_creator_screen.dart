@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
-import 'package:supabase_flutter/supabase_flutter.dart'; // NEW
 import '../models/plan.dart';
-import '../models/exercise.dart'; // NEW
 import '../services/database_service.dart';
+import '../widgets/exercise_selection_dialog.dart'; // Import the new widget
 
 class ManualPlanCreatorScreen extends StatefulWidget {
   final WorkoutPlan? planToEdit;
@@ -53,13 +52,18 @@ class _ManualPlanCreatorScreenState extends State<ManualPlanCreatorScreen> {
     });
   }
 
-  void _addExercise(int dayIndex) {
-    // We use a separate controller for the Autocomplete's text logic if needed,
-    // but Autocomplete passes the value in onSelected.
-    // However, we need a way to capture the text even if they don't select an option (custom exercise).
-    String selectedName = ""; 
+  Future<void> _addExercise(int dayIndex) async {
+    // Step 1: Pick the Exercise using the shared dialog
+    final String? selectedName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => const ExerciseSelectionDialog(),
+    );
 
-    showDialog(
+    if (selectedName == null || !mounted) return;
+
+    // Step 2: Configure Sets/Reps
+    if (!mounted) return;
+    await showDialog(
       context: context,
       builder: (ctx) {
         final setsCtrl = TextEditingController(text: "3");
@@ -68,52 +72,11 @@ class _ManualPlanCreatorScreenState extends State<ManualPlanCreatorScreen> {
         final timeCtrl = TextEditingController(text: "0");
 
         return AlertDialog(
-          title: const Text("Add Exercise"),
+          title: Text(selectedName),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // CHANGED: Replaced TextField with Autocomplete
-                Autocomplete<Exercise>(
-                  optionsBuilder: (TextEditingValue textEditingValue) async {
-                    if (textEditingValue.text.isEmpty) {
-                      return const Iterable<Exercise>.empty();
-                    }
-                    try {
-                      // Query Supabase for matching names
-                      final data = await Supabase.instance.client
-                          .from('exercises')
-                          .select()
-                          .ilike('name', '%${textEditingValue.text}%')
-                          .limit(5);
-                      return (data as List).map((e) => Exercise.fromJson(e));
-                    } catch (e) {
-                      debugPrint("Autocomplete Error: $e");
-                      return const Iterable<Exercise>.empty();
-                    }
-                  },
-                  displayStringForOption: (Exercise option) => option.name,
-                  onSelected: (Exercise selection) {
-                    selectedName = selection.name;
-                  },
-                  fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
-                    // Update local var when typing custom text
-                    textEditingController.addListener(() {
-                      selectedName = textEditingController.text;
-                    });
-                    return TextField(
-                      controller: textEditingController,
-                      focusNode: focusNode,
-                      decoration: const InputDecoration(
-                        labelText: "Exercise Name",
-                        hintText: "Search Wiki...",
-                        prefixIcon: Icon(Icons.search),
-                        border: OutlineInputBorder(),
-                      ),
-                    );
-                  },
-                ),
-                const SizedBox(height: 10),
                 Row(
                   children: [
                     Expanded(child: TextField(controller: setsCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Sets"))),
@@ -125,7 +88,7 @@ class _ManualPlanCreatorScreenState extends State<ManualPlanCreatorScreen> {
                 TextField(
                   controller: timeCtrl, 
                   keyboardType: TextInputType.number, 
-                  decoration: const InputDecoration(labelText: "Duration (sec) - 0 if not timed", hintText: "e.g. 60 for 1 min max reps")
+                  decoration: const InputDecoration(labelText: "Duration (sec) - 0 if not timed", hintText: "e.g. 60")
                 ),
               ],
             ),
@@ -134,20 +97,18 @@ class _ManualPlanCreatorScreenState extends State<ManualPlanCreatorScreen> {
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
             ElevatedButton(
               onPressed: () {
-                if (selectedName.isNotEmpty) {
-                  setState(() {
-                    _days[dayIndex].exercises.add(WorkoutExercise(
-                      name: selectedName,
-                      sets: int.tryParse(setsCtrl.text) ?? 3,
-                      reps: repsCtrl.text,
-                      restSeconds: int.tryParse(restCtrl.text) ?? 60,
-                      secondsPerSet: int.tryParse(timeCtrl.text) ?? 0,
-                    ));
-                  });
-                  Navigator.pop(ctx);
-                }
+                setState(() {
+                  _days[dayIndex].exercises.add(WorkoutExercise(
+                    name: selectedName,
+                    sets: int.tryParse(setsCtrl.text) ?? 3,
+                    reps: repsCtrl.text,
+                    restSeconds: int.tryParse(restCtrl.text) ?? 60,
+                    secondsPerSet: int.tryParse(timeCtrl.text) ?? 0,
+                  ));
+                });
+                Navigator.pop(ctx);
               },
-              child: const Text("Add"),
+              child: const Text("Add to Day"),
             ),
           ],
         );

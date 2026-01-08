@@ -2,9 +2,10 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/database_service.dart';
-import '../models/exercise.dart';
+import '../services/sync_service.dart'; // For Auto-Sync
 import '../config/equipment_bundles.dart';
 import '../theme.dart';
+import '../widgets/exercise_selection_dialog.dart';
 
 class EquipmentManagerScreen extends StatefulWidget {
   const EquipmentManagerScreen({super.key});
@@ -17,7 +18,6 @@ class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> with Si
   late TabController _tabController;
   bool _isLoading = true;
   
-  // Data
   Set<String> _ownedStandardItems = {};
   List<Map<String, dynamic>> _customItems = [];
 
@@ -68,8 +68,12 @@ class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> with Si
         _ownedStandardItems.remove(name);
       }
     });
-    // Fire and forget DB update
+    
+    // 1. Update Local DB
     await context.read<DatabaseService>().updateEquipment(name, value);
+    
+    // 2. Trigger Auto-Sync (Fire and Forget)
+    if (mounted) context.read<SyncService>().syncAll();
   }
 
   void _openCustomEditor([Map<String, dynamic>? item]) async {
@@ -158,7 +162,11 @@ class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> with Si
               itemBuilder: (context, index) {
                 final item = _customItems[index];
                 final tagsJson = item['capabilities_json'];
-                final tags = tagsJson != null ? List<String>.from(jsonDecode(tagsJson)) : <String>[];
+                
+                // FIXED: Linter friendly parsing
+                final List<String> tags = tagsJson != null 
+                    ? (jsonDecode(tagsJson) as List).map((e) => e.toString()).toList()
+                    : [];
 
                 return Card(
                   margin: const EdgeInsets.only(bottom: 12),
@@ -190,8 +198,6 @@ class ComplexEquipmentEditor extends StatefulWidget {
 class _ComplexEquipmentEditorState extends State<ComplexEquipmentEditor> {
   final _nameController = TextEditingController();
   final Set<String> _selectedCapabilities = {};
-  
-  // Separate list for specific exercises that are NOT standard tags
   final List<String> _specificExercises = []; 
 
   @override
@@ -201,13 +207,13 @@ class _ComplexEquipmentEditorState extends State<ComplexEquipmentEditor> {
       _nameController.text = widget.item!['name'];
       final json = widget.item!['capabilities_json'];
       if (json != null) {
-        final List<String> allTags = List<String>.from(jsonDecode(json));
+        // FIXED: Linter friendly parsing
+        final List<String> allTags = (jsonDecode(json) as List).map((e) => e.toString()).toList();
         
         for (var tag in allTags) {
           if (allGenericEquipment.contains(tag)) {
             _selectedCapabilities.add(tag);
           } else if (tag != widget.item!['name']) {
-            // It's a specific exercise or custom tag
             _specificExercises.add(tag);
           }
         }
@@ -219,56 +225,43 @@ class _ComplexEquipmentEditorState extends State<ComplexEquipmentEditor> {
     if (_nameController.text.isEmpty) return;
 
     final db = context.read<DatabaseService>();
+    final sync = context.read<SyncService>();
     
-    // Combine standard caps + specific exercises into one list for the DB
-    final List<String> finalCapabilities = [
+    // FIXED: Use Set literal {...} to satisfy linter 'prefer_collection_literals'
+    final List<String> finalCapabilities = {
       ..._selectedCapabilities,
       ..._specificExercises,
       _nameController.text // Include self
-    ].toSet().toList(); // De-dupe
+    }.toList();
 
     await db.updateEquipmentCapabilities(_nameController.text, finalCapabilities);
+    
+    // Auto-Sync
+    sync.syncAll();
+
     if (mounted) Navigator.pop(context);
   }
 
   Future<void> _delete() async {
     if (widget.item != null) {
       await context.read<DatabaseService>().updateEquipment(widget.item!['name'], false);
+      // Auto-Sync
+      if (mounted) context.read<SyncService>().syncAll();
     }
     if (mounted) Navigator.pop(context);
   }
 
   Future<void> _addSpecificExercise() async {
-    // This assumes EquipmentSearchScreen from a previous iteration is available or needs to be included.
-    // If it was lost, we need to add it back to this file or import it.
-    // For now, I will include a basic Search Dialog here to keep it self-contained.
-    
-    // Using a simpler approach than navigating to a full screen for now to reduce dependency complexity
-    final controller = TextEditingController();
-    await showDialog(
+    final String? selectedName = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Add Specific Exercise"),
-        content: TextField(
-          controller: controller,
-          decoration: const InputDecoration(hintText: "e.g. Lat Pulldown"),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
-          ElevatedButton(
-            onPressed: () {
-               if (controller.text.isNotEmpty) {
-                 Navigator.pop(ctx);
-                 setState(() {
-                   _specificExercises.add(controller.text);
-                 });
-               }
-            },
-            child: const Text("Add"),
-          )
-        ],
-      )
+      builder: (ctx) => const ExerciseSelectionDialog(),
     );
+
+    if (selectedName != null && selectedName.isNotEmpty) {
+      setState(() {
+        _specificExercises.add(selectedName);
+      });
+    }
   }
 
   @override
@@ -297,7 +290,6 @@ class _ComplexEquipmentEditorState extends State<ComplexEquipmentEditor> {
             ),
             const SizedBox(height: 24),
 
-            // 1. Standard Capabilities
             const Text("What functions does this provide?", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             const SizedBox(height: 8),
             const Text("Select standard equipment that this machine replaces or includes.", style: TextStyle(color: Colors.grey, fontSize: 12)),
@@ -312,8 +304,11 @@ class _ComplexEquipmentEditorState extends State<ComplexEquipmentEditor> {
                   selected: isSelected,
                   onSelected: (val) {
                     setState(() {
-                      if (val) _selectedCapabilities.add(tag);
-                      else _selectedCapabilities.remove(tag);
+                      if (val) {
+                        _selectedCapabilities.add(tag);
+                      } else {
+                        _selectedCapabilities.remove(tag);
+                      }
                     });
                   },
                 );
@@ -322,7 +317,6 @@ class _ComplexEquipmentEditorState extends State<ComplexEquipmentEditor> {
 
             const SizedBox(height: 30),
 
-            // 2. Specific Exercises
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [

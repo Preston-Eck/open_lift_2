@@ -40,19 +40,22 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
   int _restSeconds = 0;
   bool _isResting = false;
 
-  Map<String, String> _aliases = {}; // Cache aliases
+  Map<String, String> _aliases = {}; 
+  Map<String, double> _oneRepMaxes = {}; 
+  Map<String, String> _oneRepDates = {};
 
   @override
   void initState() {
     super.initState();
+    // CRITICAL FIX: Generate ID synchronously so it's ready for the build method immediately.
+    _sessionId = const Uuid().v4(); 
     _initSession();
-    _loadAliases();
+    _loadData();
   }
 
   Future<void> _initSession() async {
     try {
       await WakelockPlus.enable().catchError((_) {});
-      _sessionId = const Uuid().v4();
       
       if (widget.workoutDay != null) {
         final session = WorkoutSession(
@@ -70,11 +73,29 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
     }
   }
 
-  Future<void> _loadAliases() async {
+  Future<void> _loadData() async {
     final db = context.read<DatabaseService>();
     final aliases = await db.getAliases();
+    
+    Map<String, double> maxes = {};
+    Map<String, String> dates = {};
+
+    if (widget.workoutDay != null) {
+      for (var ex in widget.workoutDay!.exercises) {
+        final data = await db.getLatestOneRepMaxDetailed(ex.name);
+        if (data != null) {
+          maxes[ex.name] = data['weight'];
+          dates[ex.name] = data['date'];
+        }
+      }
+    }
+
     if (mounted) {
-      setState(() => _aliases = aliases);
+      setState(() {
+        _aliases = aliases;
+        _oneRepMaxes = maxes;
+        _oneRepDates = dates;
+      });
     }
   }
 
@@ -172,7 +193,9 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
               key: ValueKey("${exercises[i].name}_$i"),
               exercise: exercises[i],
               sessionId: _sessionId,
-              alias: _aliases[exercises[i].name], // Pass alias
+              alias: _aliases[exercises[i].name], 
+              oneRepMax: _oneRepMaxes[exercises[i].name], 
+              oneRepDate: _oneRepDates[exercises[i].name], 
               onSetCompleted: (restTime) => _triggerRest(restTime),
             ),
           ),
@@ -203,14 +226,18 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
 class ExerciseCard extends StatefulWidget {
   final WorkoutExercise exercise;
   final String sessionId;
-  final String? alias; // NEW
+  final String? alias;
+  final double? oneRepMax;
+  final String? oneRepDate;
   final Function(int) onSetCompleted;
 
   const ExerciseCard({
     super.key, 
     required this.exercise, 
     required this.sessionId,
-    this.alias, // NEW
+    this.alias,
+    this.oneRepMax,
+    this.oneRepDate,
     required this.onSetCompleted,
   });
 
@@ -227,6 +254,7 @@ class _ExerciseCardState extends State<ExerciseCard> {
   Timer? _localTimer;
   int _localSeconds = 0;
   bool _isTimerRunning = false;
+  LogEntry? _lastLog; 
 
   @override
   void initState() {
@@ -235,6 +263,15 @@ class _ExerciseCardState extends State<ExerciseCard> {
     _repsCtrls = List.generate(widget.exercise.sets, (_) => TextEditingController());
     _timeCtrls = List.generate(widget.exercise.sets, (_) => TextEditingController());
     _isDone = List.generate(widget.exercise.sets, (_) => false);
+    _loadLastLog();
+  }
+
+  Future<void> _loadLastLog() async {
+    final db = context.read<DatabaseService>();
+    final last = await db.getLastLogForExercise(widget.exercise.name);
+    if (mounted && last != null) {
+      setState(() => _lastLog = last);
+    }
   }
 
   @override
@@ -330,19 +367,59 @@ class _ExerciseCardState extends State<ExerciseCard> {
     }
   }
 
+  // Calculate recommendation string for hint text
+  String _getWeightHint() {
+    if (widget.oneRepMax != null) {
+      // Hypertrophy Range (75% of 1RM)
+      final target = (widget.oneRepMax! * 0.75).round();
+      return target.toString();
+    } else if (_lastLog != null) {
+      // Progressive Overload (Default to last known weight)
+      return _lastLog!.weight.toInt().toString();
+    }
+    return "-";
+  }
+
   @override
   Widget build(BuildContext context) {
+    String? oneRepMaxString;
+    if (widget.oneRepMax != null) {
+      String dateStr = "";
+      if (widget.oneRepDate != null) {
+        final dt = DateTime.parse(widget.oneRepDate!);
+        dateStr = " (${dt.month}/${dt.day})";
+      }
+      oneRepMaxString = "1RM: ${widget.oneRepMax!.toInt()}lbs$dateStr";
+    }
+
     return Card(
-      margin: const EdgeInsets.all(8),
+      margin: const EdgeInsets.only(bottom: 8),
       child: Column(
         children: [
           // Header
           ListTile(
-            // UPDATED: Show alias if available
-            title: Text(widget.alias ?? widget.exercise.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: Text(
-              "${widget.exercise.sets} Sets • ${widget.exercise.reps} reps${widget.alias != null ? ' (${widget.exercise.name})' : ''}"
+            title: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Text(
+                    widget.alias ?? widget.exercise.name, 
+                    style: const TextStyle(fontWeight: FontWeight.bold)
+                  )
+                ),
+                if (oneRepMaxString != null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(4)
+                    ),
+                    child: Text(oneRepMaxString, style: const TextStyle(fontSize: 12, color: Colors.blue, fontWeight: FontWeight.bold)),
+                  ),
+              ],
             ),
+            // Removed Coach's Tip text from subtitle
+            subtitle: Text("${widget.exercise.sets} Sets • ${widget.exercise.reps} reps${widget.alias != null ? ' (${widget.exercise.name})' : ''}"),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -382,6 +459,7 @@ class _ExerciseCardState extends State<ExerciseCard> {
           // Sets
           ...List.generate(widget.exercise.sets, (i) {
             final isDone = _isDone[i];
+            
             return Container(
               color: isDone ? Colors.green.withValues(alpha: 0.1) : null,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -392,7 +470,12 @@ class _ExerciseCardState extends State<ExerciseCard> {
                     controller: _weightCtrls[i],
                     enabled: !isDone,
                     keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(isDense: true, border: OutlineInputBorder(), hintText: "-"),
+                    decoration: InputDecoration(
+                      isDense: true, 
+                      border: const OutlineInputBorder(), 
+                      hintText: _getWeightHint(), // CHANGED: Added Hint Text Logic
+                      hintStyle: TextStyle(color: Colors.grey.withValues(alpha: 0.5)) // Semi-transparent
+                    ),
                   )),
                   const SizedBox(width: 8),
                   Expanded(flex: 2, child: TextField(

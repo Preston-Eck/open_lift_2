@@ -16,7 +16,7 @@ import 'wiki_screen.dart';
 import 'exercise_analytics_screen.dart';
 import 'global_search_screen.dart';
 import 'social_dashboard_screen.dart';
-import 'exercise_auditor_screen.dart'; // ✅ FIXED: Added missing import
+import 'exercise_auditor_screen.dart'; 
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -238,8 +238,9 @@ class HomeScreen extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 10),
+        // CHANGED: Use getOwnedItemNames to avoid listing every specific exercise as equipment
         FutureBuilder<List<String>>(
-          future: db.getOwnedEquipment(),
+          future: db.getOwnedItemNames(),
           builder: (context, snapshot) {
             if (!snapshot.hasData) return const CircularProgressIndicator();
             final equipment = snapshot.data!;
