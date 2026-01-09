@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart'; 
 import '../services/database_service.dart';
 import '../services/gemini_service.dart';
-import '../models/plan.dart';
 
 class PlanGeneratorScreen extends StatefulWidget {
   const PlanGeneratorScreen({super.key});
@@ -17,12 +16,12 @@ class _PlanGeneratorScreenState extends State<PlanGeneratorScreen> {
   final TextEditingController _goalController = TextEditingController();
   String _daysPerWeek = "3";
   bool _isLoading = false;
-  WorkoutPlan? _generatedPlan;
+  PlanGenerationResult? _generatedResult; // CHANGED
 
   Future<void> _generatePlan() async {
     setState(() {
       _isLoading = true;
-      _generatedPlan = null; 
+      _generatedResult = null; 
     });
 
     final db = context.read<DatabaseService>();
@@ -44,7 +43,6 @@ class _PlanGeneratorScreenState extends State<PlanGeneratorScreen> {
       // 2. Fetch User Profile (Database)
       final profileData = await db.getUserProfile();
       
-      // FIX: Explicitly convert dynamic DB values to Strings for the AI Service
       final Map<String, String> userProfile = {
         'Age': profileData?['birth_date']?.toString() ?? 'Unknown',
         'Height': profileData?['height']?.toString() ?? 'Unknown',
@@ -59,20 +57,28 @@ class _PlanGeneratorScreenState extends State<PlanGeneratorScreen> {
           ? "No recorded strength data (assume beginner)"
           : oneRepMaxes.entries.map((e) => "${e.key}: ${e.value.toInt()}lbs").join(", ");
 
-      // 4. Fetch Wiki Vocabulary (RAG)
+      // 4. Fetch Existing Exercises (Local DB + Supabase Cache)
       List<String> validExercises = [];
       try {
+        // Fetch custom exercises
+        final custom = await db.getCustomExercises();
+        validExercises.addAll(custom.map((e) => e.name));
+        
+        // Fetch basic list (if online)
         final response = await Supabase.instance.client
             .from('exercises')
             .select('name')
-            .limit(100); 
-        validExercises = (response as List).map((e) => e['name'] as String).toList();
+            .limit(200); 
+        validExercises.addAll((response as List).map((e) => e['name'] as String));
+        
+        // Deduplicate
+        validExercises = validExercises.toSet().toList();
       } catch (e) {
         debugPrint("Supabase Fetch Error (Offline?): $e");
       }
 
       // 5. Call AI
-      final plan = await gemini.generateFullPlan(
+      final result = await gemini.generateFullPlan(
         _goalController.text,
         _daysPerWeek,
         int.tryParse(_timeController.text) ?? 60,
@@ -83,7 +89,7 @@ class _PlanGeneratorScreenState extends State<PlanGeneratorScreen> {
       );
       
       setState(() {
-        _generatedPlan = plan;
+        _generatedResult = result;
       });
 
     } catch (e) {
@@ -159,11 +165,18 @@ class _PlanGeneratorScreenState extends State<PlanGeneratorScreen> {
             
             const Divider(height: 40),
 
-            if (_generatedPlan != null) ...[
-              Text("Plan: ${_generatedPlan!.name}", style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.green)),
-              Text("Type: ${_generatedPlan!.type}", style: const TextStyle(fontSize: 16, color: Colors.grey)),
+            if (_generatedResult != null) ...[
+              Text("Plan: ${_generatedResult!.plan.name}", style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.green)),
+              Text("Type: ${_generatedResult!.plan.type}", style: const TextStyle(fontSize: 16, color: Colors.grey)),
+              
+              if (_generatedResult!.newExercises.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Text("New Exercises Added: ${_generatedResult!.newExercises.length}", style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
+                ),
+
               const SizedBox(height: 10),
-              ..._generatedPlan!.days.map((day) => Card(
+              ..._generatedResult!.plan.days.map((day) => Card(
                 margin: const EdgeInsets.only(bottom: 10),
                 child: ExpansionTile(
                   title: Text(day.name, style: const TextStyle(fontWeight: FontWeight.bold)),
@@ -181,12 +194,27 @@ class _PlanGeneratorScreenState extends State<PlanGeneratorScreen> {
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
                   onPressed: () async {
-                    if (_generatedPlan != null) {
+                    if (_generatedResult != null) {
                       try {
-                        await context.read<DatabaseService>().savePlan(_generatedPlan!);
+                        final db = context.read<DatabaseService>();
+                        
+                        // 1. Save New Exercises
+                        int addedCount = 0;
+                        for (var ex in _generatedResult!.newExercises) {
+                          // Check if exists
+                          final exists = await db.findCustomExerciseByName(ex.name);
+                          if (exists == null) {
+                            await db.addCustomExercise(ex);
+                            addedCount++;
+                          }
+                        }
+                        
+                        // 2. Save Plan
+                        await db.savePlan(_generatedResult!.plan);
+                        
                         if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text("Plan Saved Successfully!"))
+                            SnackBar(content: Text("Plan Saved! ($addedCount new exercises added)"))
                           );
                           Navigator.pop(context);
                         }

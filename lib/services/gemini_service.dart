@@ -4,6 +4,14 @@ import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 import '../models/plan.dart';
+import '../models/exercise.dart'; // Import Exercise model
+
+class PlanGenerationResult {
+  final WorkoutPlan plan;
+  final List<Exercise> newExercises;
+
+  PlanGenerationResult(this.plan, this.newExercises);
+}
 
 class GeminiService {
   late final GenerativeModel _model;
@@ -22,16 +30,16 @@ class GeminiService {
     );
   }
 
-  Future<WorkoutPlan?> generateFullPlan(
+  Future<PlanGenerationResult?> generateFullPlan(
     String goal,
     String daysPerWeek,
     int duration,
     List<String> equipment,
     Map<String, String> userProfile,
     String strengthStats,
-    List<String> validExercises,
+    List<String> validExercises, // KNOWN EXERCISES
   ) async {
-    // CHANGED: Completely overhauled prompt to enforce strict equipment rules
+    // Optimized prompt for healthy, valid plans
     final prompt = '''
       You are an expert Strength & Conditioning Coach. Create a $daysPerWeek-day/week workout plan.
       
@@ -42,68 +50,85 @@ class GeminiService {
       STRENGTH STATS: $strengthStats
       
       === INVENTORY (CRITICAL) ===
-      AVAILABLE TOOLS & CAPABILITIES: ${equipment.isEmpty ? "Bodyweight only" : equipment.join(', ')}.
+      AVAILABLE TOOLS: ${equipment.isEmpty ? "Bodyweight only" : equipment.join(', ')}.
       
-      *** STRICT RULES FOR EQUIPMENT USAGE ***
-      1. **VALIDATION:** You may ONLY program an exercise if the user explicitly has the required tool in the list above.
-         - If "Barbell" is NOT listed, you CANNOT program Barbell Squats, Bench Press, etc.
-         - If "Cable" is NOT listed, you CANNOT program Cable Flys or Tricep Pushdowns.
-         - "Bodyweight" is always available.
-      
-      2. **MACHINE IDENTIFICATION:** The list contains Model Names (e.g., "SincMill SCM-1160", "Bowflex"). 
-         - **NEVER** use a Model Name as the "name" of an exercise. 
-         - Instead, use the standard movement that machine allows (e.g., use "Lat Pulldown", NOT "SincMill SCM-1160").
-         - If a specific machine is listed, assume the user can perform standard exercises associated with it (e.g. Power Cage = Squats, Pull-ups).
+      *** RULES ***
+      1. **VALIDATION:** ONLY program exercises if the user has the required tool.
+      2. **EXISTING EXERCISES:** Prefer using exercises from this list: ${validExercises.take(100).join(', ')}... (and others you know are standard).
+      3. **NEW EXERCISES:** If you need an exercise NOT commonly known or specific to a machine, you MUST define it in `definitions`.
+      4. **HEALTHY ROUTINE:** 
+         - Include Warm-up (Mobility) and Cool-down.
+         - Balance Push/Pull/Legs or Upper/Lower to prevent injury.
+         - Ensure appropriate volume (sets/reps) for the goal.
 
-      3. **SUBSTITUTIONS:** If the user lacks a tool (e.g. No Barbell), you MUST substitute with an available tool (e.g. Dumbbell Squat).
-
-      === PROGRAM STRUCTURE ===
-      1. **Warm-up:** Every session MUST start with a "Warm-up & Mobility" section (5-10 mins).
-      2. **Selection:** Use standard, proven exercises. Prioritize compound movements first.
-      3. **Progression:** Ensure the volume/intensity fits the user's fitness level.
-
-      === OUTPUT ===
-      Return ONLY valid JSON with this structure (Array of Days):
-      [
-        {
-          "day_name": "Day 1 - Upper Body Focus",
-          "exercises": [
-            {
-              "name": "Cat-Cow Stretch",
-              "sets": 1,
-              "reps": "60 sec",
-              "rest": 0,
-              "notes": "Mobility Warm-up"
-            },
-            {
-              "name": "Dumbbell Bench Press",
-              "sets": 3,
-              "reps": "8-12",
-              "rest": 60,
-              "notes": "Control the eccentric"
-            }
-          ]
-        }
-      ]
+      === OUTPUT STRUCTURE ===
+      Return a SINGLE JSON Object:
+      {
+        "definitions": [
+          {
+            "name": "Face Pull",
+            "category": "Shoulders",
+            "primary_muscles": ["Rear Delts", "Rotator Cuff"],
+            "equipment": ["Cable"],
+            "instructions": ["Set rope to face height", "Pull to forehead", "Squeeze rear delts"],
+            "images": [] 
+          }
+        ],
+        "schedule": [
+          {
+            "day_name": "Day 1 - Upper Power",
+            "exercises": [
+              {
+                "name": "Face Pull",
+                "sets": 3,
+                "reps": "12-15",
+                "rest": 60,
+                "notes": "Warm-up"
+              }
+            ]
+          }
+        ]
+      }
     ''';
 
     try {
       final content = [Content.text(prompt)];
       final response = await _model.generateContent(content);
-      final String rawJson = response.text ?? "[]";
+      final String rawJson = response.text ?? "{}";
       
       final cleanJson = rawJson.replaceAll('```json', '').replaceAll('```', '').trim();
-      final List<dynamic> daysRaw = jsonDecode(cleanJson);
+      final Map<String, dynamic> data = jsonDecode(cleanJson);
 
+      // 1. Parse Definitions (New Exercises)
+      final List<Exercise> newExercises = [];
+      if (data['definitions'] != null) {
+        for (var def in data['definitions']) {
+          newExercises.add(Exercise(
+            id: const Uuid().v4(), // Generate ID for new exercise
+            name: def['name'],
+            category: def['category'],
+            primaryMuscles: List<String>.from(def['primary_muscles'] ?? []),
+            secondaryMuscles: [],
+            equipment: List<String>.from(def['equipment'] ?? []),
+            instructions: List<String>.from(def['instructions'] ?? []),
+            images: [], // No photos generated
+          ));
+        }
+      }
+
+      // 2. Parse Schedule
+      final List<dynamic> daysRaw = data['schedule'] ?? [];
       final List<WorkoutDay> days = daysRaw.map((d) => WorkoutDay.fromMap(d)).toList();
 
-      return WorkoutPlan(
+      final plan = WorkoutPlan(
         id: const Uuid().v4(),
         name: "AI: $goal",
         goal: goal,
         type: "AI Generated",
         days: days,
       );
+
+      return PlanGenerationResult(plan, newExercises);
 
     } catch (e) {
       debugPrint("Gemini Plan Generation Error: $e");

@@ -373,6 +373,33 @@ class DatabaseService extends ChangeNotifier {
       return Exercise(id: e['id'] as String, name: e['name'] as String, category: e['category'] as String?, primaryMuscles: (e['primary_muscles'] as String).split(','), secondaryMuscles: [], equipment: eq, instructions: [(e['notes'] as String?) ?? ''], images: []);
     }).toList();
   }
+
+  Future<Exercise?> findCustomExerciseByName(String name) async {
+    final db = await database;
+    final res = await db.query(
+      'custom_exercises',
+      where: 'name LIKE ?',
+      whereArgs: [name],
+      limit: 1,
+    );
+    if (res.isEmpty) return null;
+    
+    final e = res.first;
+    List<String> eq = [];
+    if (e['equipment_json'] != null) {
+      try { eq = List<String>.from(jsonDecode(e['equipment_json'] as String)); } catch (_) {}
+    }
+    return Exercise(
+      id: e['id'] as String,
+      name: e['name'] as String,
+      category: e['category'] as String?,
+      primaryMuscles: (e['primary_muscles'] as String).split(','),
+      secondaryMuscles: [],
+      equipment: eq,
+      instructions: [(e['notes'] as String?) ?? ''],
+      images: [],
+    );
+  }
   
   // Plans
   Future<void> savePlan(WorkoutPlan plan) async {
