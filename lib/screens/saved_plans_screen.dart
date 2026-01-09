@@ -168,10 +168,10 @@ class _SavedPlansScreenState extends State<SavedPlansScreen> {
                 
                 if (ctx.mounted) Navigator.pop(ctx);
                 
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Plan Imported Successfully!")));
-                  setState(() {});
-                }
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Plan Imported Successfully!")));
+                setState(() {});
+
               } catch (e) {
                 if (mounted) {
                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Invalid JSON: $e"), backgroundColor: Colors.red));
