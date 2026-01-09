@@ -18,8 +18,9 @@ class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> with Si
   late TabController _tabController;
   bool _isLoading = true;
   
-  Set<String> _ownedStandardItems = {};
+  Set<String> _gymEnabledItems = {}; // Changed from _ownedStandardItems
   List<Map<String, dynamic>> _customItems = [];
+  String? _currentGymName; // Displayed for context
 
   @override
   void initState() {
@@ -32,26 +33,41 @@ class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> with Si
     if (!mounted) return;
     final db = context.read<DatabaseService>();
     try {
-      final allItems = await db.getUserEquipmentList();
+      // 1. Get Current Gym Context
+      final gymProfiles = await db.getGymProfiles();
+      final currentGymId = db.currentGymId ?? (gymProfiles.isNotEmpty ? gymProfiles.firstWhere((g) => g.isDefault).id : null);
       
-      final Set<String> standardSet = {};
+      if (currentGymId == null) {
+        if (mounted) setState(() => _isLoading = false);
+        return;
+      }
+
+      final currentGym = gymProfiles.firstWhere((g) => g.id == currentGymId);
+      
+      // 2. Get Items Enabled in THIS Gym (IDs)
+      final enabledIds = await db.getGymItemIds(currentGymId);
+      final enabledSet = enabledIds.toSet();
+
+      // 3. Get All Custom Items (Global) to display in the list
+      final allItems = await db.getUserEquipmentList();
       final List<Map<String, dynamic>> customList = [];
 
       for (var item in allItems) {
         final name = item['name'] as String;
-        final isOwned = (item['is_owned'] as int) == 1;
-
-        if (allGenericEquipment.contains(name)) {
-          if (isOwned) standardSet.add(name);
-        } else if (isOwned) {
-          customList.add(item);
+        // If it's NOT a standard tag, it's a custom item/machine
+        if (!allGenericEquipment.contains(name)) {
+          // Add 'isEnabled' flag for UI
+          final map = Map<String, dynamic>.from(item);
+          map['isEnabledInGym'] = enabledSet.contains(item['id']);
+          customList.add(map);
         }
       }
 
       if (mounted) {
         setState(() {
-          _ownedStandardItems = standardSet;
+          _gymEnabledItems = enabledSet;
           _customItems = customList;
+          _currentGymName = currentGym.name;
           _isLoading = false;
         });
       }
@@ -61,18 +77,22 @@ class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> with Si
   }
 
   void _toggleStandardItem(String name, bool value) async {
+    final db = context.read<DatabaseService>();
+    final gymId = db.currentGymId;
+    if (gymId == null) return;
+
     setState(() {
       if (value) {
-        _ownedStandardItems.add(name);
+        _gymEnabledItems.add(name); // For standard items, ID = Name
       } else {
-        _ownedStandardItems.remove(name);
+        _gymEnabledItems.remove(name);
       }
     });
     
-    // 1. Update Local DB
-    await context.read<DatabaseService>().updateEquipment(name, value);
+    // Update Gym Junction Table
+    await db.toggleGymEquipment(gymId, name, value);
     
-    // 2. Trigger Auto-Sync (Fire and Forget)
+    // Auto-Sync
     if (mounted) context.read<SyncService>().syncAll();
   }
 
@@ -84,19 +104,43 @@ class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> with Si
     _loadData();
   }
 
+  void _toggleCustomItem(String id, bool value) async {
+    final db = context.read<DatabaseService>();
+    final gymId = db.currentGymId;
+    if (gymId == null) return;
+
+    setState(() {
+      // Optimistic Update
+      final index = _customItems.indexWhere((i) => i['id'] == id);
+      if (index != -1) {
+        _customItems[index]['isEnabledInGym'] = value;
+      }
+    });
+
+    await db.toggleGymEquipment(gymId, id, value);
+    if (mounted) context.read<SyncService>().syncAll();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Manage Equipment"),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text("Manage Equipment", style: TextStyle(fontSize: 18)),
+            if (_currentGymName != null)
+              Text("Editing: $_currentGymName", style: const TextStyle(fontSize: 12, color: Colors.grey)),
+          ],
+        ),
         bottom: TabBar(
           controller: _tabController,
           labelColor: AppTheme.renewalTeal,
           unselectedLabelColor: Colors.grey,
           indicatorColor: AppTheme.renewalTeal,
           tabs: const [
-            Tab(text: "Standard Checklist"),
-            Tab(text: "Custom & Machines"),
+            Tab(text: "Checklist"),
+            Tab(text: "Machines"),
           ],
         ),
       ),
@@ -121,7 +165,7 @@ class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> with Si
           child: Padding(
             padding: EdgeInsets.all(12.0),
             child: Text(
-              "Select individual items you own. These are automatically used by the AI Coach.",
+              "Select items available at this specific location.",
               style: TextStyle(fontSize: 14, color: AppTheme.foundationalSlate),
             ),
           ),
@@ -131,7 +175,7 @@ class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> with Si
           spacing: 10,
           runSpacing: 10,
           children: allGenericEquipment.map((tag) {
-            final isSelected = _ownedStandardItems.contains(tag);
+            final isSelected = _gymEnabledItems.contains(tag);
             return FilterChip(
               label: Text(tag),
               selected: isSelected,
@@ -149,36 +193,49 @@ class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> with Si
     return Scaffold(
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _openCustomEditor(),
-        label: const Text("Add Custom Gear"),
+        label: const Text("Create New"),
         icon: const Icon(Icons.add),
         backgroundColor: AppTheme.motivationCoral,
         foregroundColor: Colors.white,
       ),
       body: _customItems.isEmpty
-          ? const Center(child: Text("No custom equipment added.\nUse this for Home Gyms, Machines, etc.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)))
+          ? const Center(child: Text("No custom equipment created.", style: TextStyle(color: Colors.grey)))
           : ListView.builder(
               padding: const EdgeInsets.all(16),
               itemCount: _customItems.length,
               itemBuilder: (context, index) {
                 final item = _customItems[index];
+                final isEnabled = item['isEnabledInGym'] as bool;
                 final tagsJson = item['capabilities_json'];
-                
-                // FIXED: Linter friendly parsing
                 final List<String> tags = tagsJson != null 
                     ? (jsonDecode(tagsJson) as List).map((e) => e.toString()).toList()
                     : [];
 
                 return Card(
                   margin: const EdgeInsets.only(bottom: 12),
-                  child: ListTile(
-                    title: Text(item['name'], style: const TextStyle(fontWeight: FontWeight.bold)),
+                  // Visual indication if enabled/disabled
+                  color: isEnabled ? Colors.white : Colors.grey[100],
+                  child: SwitchListTile(
+                    title: Text(
+                      item['name'], 
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: isEnabled ? Colors.black : Colors.grey
+                      )
+                    ),
                     subtitle: Text(
-                      tags.isEmpty ? "No capabilities set" : "Enable: ${tags.take(4).join(', ')}${tags.length > 4 ? '...' : ''}",
+                      tags.isEmpty ? "No capabilities" : tags.take(4).join(', '),
                       maxLines: 1, 
                       overflow: TextOverflow.ellipsis
                     ),
-                    trailing: const Icon(Icons.edit, size: 20, color: Colors.grey),
-                    onTap: () => _openCustomEditor(item),
+                    value: isEnabled,
+                    // FIXED: Replaced deprecated activeColor
+                    activeTrackColor: AppTheme.renewalTeal,
+                    onChanged: (val) => _toggleCustomItem(item['id'], val),
+                    secondary: IconButton(
+                      icon: const Icon(Icons.edit, size: 20, color: Colors.grey),
+                      onPressed: () => _openCustomEditor(item),
+                    ),
                   ),
                 );
               },
@@ -207,9 +264,7 @@ class _ComplexEquipmentEditorState extends State<ComplexEquipmentEditor> {
       _nameController.text = widget.item!['name'];
       final json = widget.item!['capabilities_json'];
       if (json != null) {
-        // FIXED: Linter friendly parsing
         final List<String> allTags = (jsonDecode(json) as List).map((e) => e.toString()).toList();
-        
         for (var tag in allTags) {
           if (allGenericEquipment.contains(tag)) {
             _selectedCapabilities.add(tag);
@@ -227,25 +282,42 @@ class _ComplexEquipmentEditorState extends State<ComplexEquipmentEditor> {
     final db = context.read<DatabaseService>();
     final sync = context.read<SyncService>();
     
-    // FIXED: Use Set literal {...} to satisfy linter 'prefer_collection_literals'
     final List<String> finalCapabilities = {
       ..._selectedCapabilities,
       ..._specificExercises,
-      _nameController.text // Include self
+      _nameController.text 
     }.toList();
 
+    // 1. Update Global Definition
+    // (Note: We use updateEquipmentCapabilities which manages the 'user_equipment' table)
     await db.updateEquipmentCapabilities(_nameController.text, finalCapabilities);
     
-    // Auto-Sync
+    // 2. If it's a NEW item (or not passed in), auto-enable it for the current gym
+    // (Assumes updateEquipmentCapabilities creates it if missing, which it does)
+    if (widget.item == null) {
+      final gymId = db.currentGymId;
+      if (gymId != null) {
+        // Need to find the ID. Since updateEquipmentCapabilities uses name as ID for standard or existing logic,
+        // we need to be careful.
+        // Actually, user_equipment IDs are typically names for standard, but UUIDs for custom?
+        // Your existing DatabaseService.updateEquipmentCapabilities uses:
+        // where: 'id = ?', whereArgs: [name]
+        // This implies for Custom items you are using the Name as the ID? 
+        // If so, we can use the name. If not, we need the UUID.
+        // Looking at DatabaseService: updateEquipment inserts with 'id': name.
+        // So ID = Name currently.
+        await db.toggleGymEquipment(gymId, _nameController.text, true);
+      }
+    }
+    
     sync.syncAll();
-
     if (mounted) Navigator.pop(context);
   }
 
   Future<void> _delete() async {
+    // Soft delete or remove? Currently just disables ownership globally.
     if (widget.item != null) {
       await context.read<DatabaseService>().updateEquipment(widget.item!['name'], false);
-      // Auto-Sync
       if (mounted) context.read<SyncService>().syncAll();
     }
     if (mounted) Navigator.pop(context);
@@ -287,12 +359,12 @@ class _ComplexEquipmentEditorState extends State<ComplexEquipmentEditor> {
                 hintText: "e.g. Major Lutie Power Cage",
                 border: OutlineInputBorder()
               ),
+              // Disable editing ID (Name) for existing items to prevent breaking links
+              enabled: widget.item == null, 
             ),
             const SizedBox(height: 24),
 
             const Text("What functions does this provide?", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            const SizedBox(height: 8),
-            const Text("Select standard equipment that this machine replaces or includes.", style: TextStyle(color: Colors.grey, fontSize: 12)),
             const SizedBox(height: 10),
             Wrap(
               spacing: 8,
@@ -314,8 +386,8 @@ class _ComplexEquipmentEditorState extends State<ComplexEquipmentEditor> {
                 );
               }).toList(),
             ),
-
-            const SizedBox(height: 30),
+            // ... (Rest of UI same as before) ...
+             const SizedBox(height: 30),
 
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,

@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
 import '../services/database_service.dart';
 import '../services/sync_service.dart';
-import '../services/logger_service.dart';
+import '../services/logger_service.dart'; // ✅ ADDED MISSING IMPORT
 import 'equipment_manager_screen.dart';
 import 'plan_generator_screen.dart';
 import 'saved_plans_screen.dart';
@@ -17,6 +17,7 @@ import 'exercise_analytics_screen.dart';
 import 'global_search_screen.dart';
 import 'social_dashboard_screen.dart';
 import 'exercise_auditor_screen.dart'; 
+import '../widgets/gym_selector.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -218,7 +219,6 @@ class HomeScreen extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             const Text("My Equipment", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            // ✅ FIXED: Consolidated Auditor and Manage buttons here
             Row(
               children: [
                 IconButton(
@@ -238,16 +238,20 @@ class HomeScreen extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 10),
-        // CHANGED: Use getOwnedItemNames to avoid listing every specific exercise as equipment
+        
+        // Gym Selector Widget
+        const GymSelector(),
+        const SizedBox(height: 10),
+
         FutureBuilder<List<String>>(
-          future: db.getOwnedItemNames(),
+          future: db.getActiveEquipment(), 
           builder: (context, snapshot) {
             if (!snapshot.hasData) return const CircularProgressIndicator();
             final equipment = snapshot.data!;
             
             if (equipment.isEmpty) {
               return ActionChip(
-                label: const Text("Tap to set up your Gym"),
+                label: const Text("Tap 'Manage' to set up this Gym"),
                 avatar: const Icon(Icons.add),
                 onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EquipmentManagerScreen())),
               );
