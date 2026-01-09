@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/database_service.dart';
 import 'about_screen.dart';
+import '../services/export_service.dart';
+import '../services/health_service.dart'; // NEW
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -161,6 +163,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 20),
+          
+          // Health Connect Integration
+          FutureBuilder<bool>(
+            future: HealthService().isSupported(),
+            builder: (context, snapshot) {
+              if (snapshot.data == true) {
+                return SwitchListTile(
+                  title: const Text("Sync with Health App"),
+                  subtitle: const Text("Pull weight & height from Google Fit / HealthKit"),
+                  value: false, // In a real app, store this pref
+                  onChanged: (val) async {
+                     if (val) {
+                       final success = await HealthService().requestPermissions();
+                       if (success && context.mounted) {
+                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Health Sync Enabled")));
+                         // Auto-pull weight
+                         final w = await HealthService().fetchLatestWeight();
+                         if (w != null) {
+                           // Update controller (assuming KG returned)
+                           if (_unitSystem == 'Metric') {
+                              _weightController.text = w.toStringAsFixed(1);
+                           } else {
+                              _weightController.text = (w * 2.20462).toStringAsFixed(1);
+                           }
+                         }
+                       }
+                     }
+                  },
+                );
+              }
+              return const SizedBox.shrink();
+            },
+          ),
 
           const Text("Personal Stats", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 10),
@@ -244,6 +279,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
 
           const SizedBox(height: 40),
+          
+          ListTile(
+            leading: const Icon(Icons.download, color: Colors.blue),
+            title: const Text("Export Data (Backup)"),
+            subtitle: const Text("Save your logs and plans to a JSON file."),
+            onTap: () async {
+              try {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("Preparing export..."))
+                );
+                final db = context.read<DatabaseService>();
+                await ExportService(db).exportAllData();
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text("Export failed: $e"), backgroundColor: Colors.red)
+                  );
+                }
+              }
+            },
+          ),
+          
           const Divider(),
           ListTile(
             leading: const Icon(Icons.info_outline, color: Colors.grey),

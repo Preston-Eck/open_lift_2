@@ -257,4 +257,48 @@ class GeminiService {
       return "I encountered an error connecting to the coaching server. Please check your internet connection.";
     }
   }
+
+  /// Generates a Weekly Review based on recent logs.
+  Future<Map<String, dynamic>> generateWeeklyReview(List<Map<String, dynamic>> lastWeekLogs) async {
+    final prompt = '''
+      You are an elite Strength Coach analyzing a client's past week of training.
+      
+      === DATA (LAST 7 DAYS) ===
+      ${jsonEncode(lastWeekLogs)}
+      
+      === TASK ===
+      Analyze the volume, consistency, and intensity.
+      
+      Return ONLY valid JSON with this structure:
+      {
+        "score": 85, // 0-100 based on consistency
+        "summary": "Great work hitting the gym 4 times this week! Your chest volume is up.",
+        "highlights": ["New PR on Bench Press", "Consistent workout times"],
+        "improvements": ["Missed Leg Day", "Low volume on back exercises"],
+        "next_week_goals": [
+          "Increase Squat weight by 5lbs",
+          "Add 1 more set to Pull-ups"
+        ]
+      }
+    ''';
+
+    try {
+      final content = [Content.text(prompt)];
+      final response = await _model.generateContent(content);
+      
+      final String rawJson = response.text ?? "{}";
+      final cleanJson = rawJson.replaceAll('```json', '').replaceAll('```', '').trim();
+      
+      return jsonDecode(cleanJson);
+    } catch (e) {
+      debugPrint("Weekly Review Error: $e");
+      return {
+        "score": 0,
+        "summary": "Unable to generate review. Please try again.",
+        "highlights": [],
+        "improvements": [],
+        "next_week_goals": []
+      };
+    }
+  }
 }

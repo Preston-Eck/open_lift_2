@@ -23,23 +23,52 @@
 * **[CRITICAL] Sync Gap:** `SyncService` currently **only** syncs Plans and Logs. It fails to sync `user_equipment` and `custom_exercises`, causing data loss across devices.
     * *Action:* Must implement `_pushEquipment`, `_pullEquipment`, `_pushCustomExercises` in `SyncService`.
 
-## 4. Roadmap (v1.1.0 & Beyond)
-1.  **Gym Locations (Multi-Profile):**
-    * Allow users to define "Gym Profiles" (e.g., Home, Work, Brother's Gym).
-    * Link specific equipment lists to these profiles.
-    * Switching profiles automatically filters available exercises/plans.
-    * Allow users to share "Gym Profiles" with others.
-2.  **User Onboarding Checklist:**
-    * Dashboard widget guiding users: 1. Profile -> 2. Gym Setup -> 3. Create Plan.
-3.  **AI Coach Chatbot:**
-    * Conversational interface for fitness advice using RAG on user logs.
+## 4. Completed Features (v1.1.0)
 
-## 5. Recent Lessons
-* **Prompt Engineering:** AI requires explicit distinction between "Tools" (Machines) and "Actions" (Exercises).
-* **Deployment:** `accessibility_plugin.cc` errors on Windows are harmless noise.
-* **Data Safety:** Always verify "Sync" covers *all* new tables created during feature development.
+*   **[NEW] AI Coach Chatbot:** Conversational RAG interface (Profile + Logs + Equipment).
 
-## 6. Key Files
-* `lib/services/sync_service.dart` (Needs Update)
-* `lib/services/database_service.dart` (Source of Truth)
-* `lib/screens/equipment_manager_screen.dart` (UI for Equipment)
+*   **[NEW] Weekly Review:** AI-generated analysis of volume, consistency, and goals.
+
+*   **[NEW] Visual Heatmap:** "Low Poly" anatomical map visualizing muscle usage.
+
+*   **[NEW] Data Export:** JSON backup of all user data.
+
+*   **[NEW] Health Integration:** Sync weight from Health Connect/Google Fit (Stubbed for Mobile).
+
+*   **[NEW] Gym Locations:** Multi-profile equipment management with "Full Replace" sync.
+
+*   **[NEW] Onboarding Checklist:** Guided setup for new users.
+
+
+
+## 5. Roadmap (Future)
+
+1.  **Wearable Integration:** Real-time heart rate from Bluetooth Low Energy (BLE) devices.
+
+2.  **Social Leaderboards:** Share "Weekly Score" with friends.
+
+3.  **Offline Mode Polish:** Queue requests when offline (currently SyncService aborts).
+
+
+
+## 6. Recent Lessons
+
+*   **Prompt Engineering:** AI requires explicit distinction between "Tools" (Machines) and "Actions" (Exercises).
+
+*   **Deployment:** `accessibility_plugin.cc` errors on Windows are harmless noise.
+
+*   **Data Safety:** Always verify "Sync" covers *all* new tables created during feature development.
+
+*   **Linter:** `share_plus` API shifts frequently; ignore deprecation warnings if functionality works.
+
+
+
+## 7. Key Files
+
+*   `lib/services/sync_service.dart` (Critical Sync Logic)
+
+*   `lib/services/gemini_service.dart` (AI Logic)
+
+*   `lib/services/health_service.dart` (HealthKit/Connect)
+
+*   `lib/screens/ai_coach_screen.dart` (Chat UI)

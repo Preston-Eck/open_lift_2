@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme.dart';
+import 'body_paths.dart';
 
 class MuscleHeatmap extends StatelessWidget {
   final Map<String, double> muscleIntensities;
@@ -23,15 +24,16 @@ class MuscleHeatmap extends StatelessWidget {
         Text(label, style: Theme.of(context).textTheme.labelLarge),
         const SizedBox(height: 8),
         AspectRatio(
-          aspectRatio: 0.6,
+          aspectRatio: 0.5, // Taller aspect ratio for full body
           child: Container(
+            padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: AppTheme.foundationalSlate.withValues(alpha: 0.1)),
             ),
             child: CustomPaint(
-              painter: BodyPainter(
+              painter: LowPolyBodyPainter(
                 isFront: isFront,
                 intensities: muscleIntensities,
                 baseColor: AppTheme.foundationalSlate.withValues(alpha: 0.05),
@@ -45,13 +47,13 @@ class MuscleHeatmap extends StatelessWidget {
   }
 }
 
-class BodyPainter extends CustomPainter {
+class LowPolyBodyPainter extends CustomPainter {
   final bool isFront;
   final Map<String, double> intensities;
   final Color baseColor;
   final Color highlightColor;
 
-  BodyPainter({
+  LowPolyBodyPainter({
     required this.isFront,
     required this.intensities,
     required this.baseColor,
@@ -60,96 +62,72 @@ class BodyPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final Paint paint = Paint()..style = PaintingStyle.fill;
-    
-    // Scale canvas to a standard 100x200 grid for easier path definition
-    canvas.scale(size.width / 100, size.height / 200);
+    final paint = Paint()..style = PaintingStyle.fill;
+    final stroke = Paint()
+      ..style = PaintingStyle.stroke
+      ..color = Colors.white
+      ..strokeWidth = 2; // Thicker white lines for "Low Poly" look
 
-    void drawPart(String id, Path path) {
-      // Check for intensity (support plural/singular naming if needed)
-      final intensity = intensities[id] ?? 0.0;
-      
-      if (intensity > 0) {
-        paint.color = Color.lerp(Colors.white, highlightColor, intensity)!;
-      } else {
-        paint.color = baseColor;
+    // Scale 100x120 grid to canvas
+    // Our paths are approx 0..100 width, 0..120 height
+    final scaleX = size.width / 100;
+    final scaleY = size.height / 130;
+    canvas.scale(scaleX, scaleY);
+
+    void draw(Path path, List<String> muscleKeys) {
+      double maxIntensity = 0.0;
+      for (var key in muscleKeys) {
+        // Normalize keys
+        final k = key.toLowerCase().trim();
+        if (intensities.containsKey(k)) {
+          if (intensities[k]! > maxIntensity) maxIntensity = intensities[k]!;
+        }
+        // Handle common variations
+        if (k == 'legs' && (muscleKeys.contains('quads') || muscleKeys.contains('hamstrings'))) {
+           if ((intensities['legs'] ?? 0) > maxIntensity) maxIntensity = intensities['legs']!;
+        }
       }
-      
+
+      paint.color = maxIntensity > 0 
+          ? Color.lerp(baseColor, highlightColor, maxIntensity)!
+          : baseColor;
+
       canvas.drawPath(path, paint);
-      
-      // Draw outline
-      final borderPaint = Paint()
-        ..style = PaintingStyle.stroke
-        ..color = Colors.black12
-        ..strokeWidth = 0.5;
-      canvas.drawPath(path, borderPaint);
+      canvas.drawPath(path, stroke);
     }
 
     if (isFront) {
-      _drawFront(drawPart);
+      draw(BodyPaths.chestLeft, ['chest', 'pectorals', 'pecs', 'upper body']);
+      draw(BodyPaths.chestRight, ['chest', 'pectorals', 'pecs', 'upper body']);
+      draw(BodyPaths.absUpper, ['abs', 'abdominals', 'core']);
+      draw(BodyPaths.absLower, ['abs', 'abdominals', 'core']);
+      draw(BodyPaths.shoulderLeft, ['shoulders', 'deltoids', 'delts']);
+      draw(BodyPaths.shoulderRight, ['shoulders', 'deltoids', 'delts']);
+      draw(BodyPaths.bicepLeft, ['biceps', 'arms']);
+      draw(BodyPaths.bicepRight, ['biceps', 'arms']);
+      draw(BodyPaths.forearmsLeft, ['forearms', 'arms']);
+      draw(BodyPaths.forearmsRight, ['forearms', 'arms']);
+      draw(BodyPaths.quadsLeft, ['quads', 'quadriceps', 'legs']);
+      draw(BodyPaths.quadsRight, ['quads', 'quadriceps', 'legs']);
+      draw(BodyPaths.calvesLeft, ['calves', 'legs']);
+      draw(BodyPaths.calvesRight, ['calves', 'legs']);
     } else {
-      _drawBack(drawPart);
+      draw(BodyPaths.traps, ['traps', 'trapezius', 'back', 'shoulders']);
+      draw(BodyPaths.latsLeft, ['lats', 'latissimus', 'back']);
+      draw(BodyPaths.latsRight, ['lats', 'latissimus', 'back']);
+      draw(BodyPaths.glutesLeft, ['glutes', 'gluteus', 'butt', 'legs']);
+      draw(BodyPaths.glutesRight, ['glutes', 'gluteus', 'butt', 'legs']);
+      draw(BodyPaths.hamsLeft, ['hamstrings', 'hams', 'legs']);
+      draw(BodyPaths.hamsRight, ['hamstrings', 'hams', 'legs']);
+      draw(BodyPaths.tricepsLeft, ['triceps', 'arms']);
+      draw(BodyPaths.tricepsRight, ['triceps', 'arms']);
+      draw(BodyPaths.calvesLeft, ['calves', 'legs']);
+      draw(BodyPaths.calvesRight, ['calves', 'legs']);
     }
   }
 
-  void _drawFront(Function(String, Path) draw) {
-    // --- CHEST (Pectorals) ---
-    final chest = Path()..addRect(const Rect.fromLTWH(35, 40, 30, 20));
-    draw('pectorals', chest);
-    draw('chest', chest);
-
-    // --- ABS (Abdominals) ---
-    final abs = Path()..addRect(const Rect.fromLTWH(40, 62, 20, 25));
-    draw('abdominals', abs);
-    draw('abs', abs);
-
-    // --- SHOULDERS (Deltoids) ---
-    final shoulders = Path()
-      ..addOval(const Rect.fromLTWH(20, 38, 15, 15)) // Left
-      ..addOval(const Rect.fromLTWH(65, 38, 15, 15)); // Right
-    draw('shoulders', shoulders);
-    draw('deltoids', shoulders);
-
-    // --- BICEPS ---
-    final biceps = Path()
-      ..addRect(const Rect.fromLTWH(20, 55, 12, 15)) // Left
-      ..addRect(const Rect.fromLTWH(68, 55, 12, 15)); // Right
-    draw('biceps', biceps);
-
-    // --- QUADS (Quadriceps) ---
-    final quads = Path()..addRect(const Rect.fromLTWH(30, 90, 40, 40));
-    draw('quadriceps', quads);
-    draw('quads', quads);
-  }
-
-  void _drawBack(Function(String, Path) draw) {
-    // --- BACK (Lats/Traps) ---
-    final back = Path()..addRect(const Rect.fromLTWH(32, 40, 36, 35));
-    draw('back', back);
-    draw('lats', back);
-    draw('trapezius', back);
-
-    // --- TRICEPS ---
-    final triceps = Path()
-      ..addRect(const Rect.fromLTWH(20, 50, 10, 20)) // Left
-      ..addRect(const Rect.fromLTWH(70, 50, 10, 20)); // Right
-    draw('triceps', triceps);
-
-    // --- GLUTES ---
-    final glutes = Path()..addRect(const Rect.fromLTWH(32, 78, 36, 20));
-    draw('glutes', glutes);
-
-    // --- HAMSTRINGS ---
-    final hams = Path()..addRect(const Rect.fromLTWH(32, 100, 36, 35));
-    draw('hamstrings', hams);
-    
-    // --- CALVES ---
-    final calves = Path()..addRect(const Rect.fromLTWH(35, 140, 30, 25));
-    draw('calves', calves);
-  }
-
   @override
-  bool shouldRepaint(covariant BodyPainter oldDelegate) {
+  bool shouldRepaint(covariant LowPolyBodyPainter oldDelegate) {
     return oldDelegate.intensities != intensities;
   }
 }

@@ -6,6 +6,7 @@ import '../services/analytics_service.dart';
 import '../theme.dart';
 import '../models/exercise.dart';
 import '../widgets/muscle_heatmap.dart';
+import 'weekly_review_screen.dart'; // NEW
 
 class AnalyticsScreen extends StatefulWidget {
   const AnalyticsScreen({super.key});
@@ -53,6 +54,13 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text("Training Analytics")),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WeeklyReviewScreen())),
+        label: const Text("Weekly Review"),
+        icon: const Icon(Icons.insights),
+        backgroundColor: AppTheme.motivationCoral,
+        foregroundColor: Colors.white,
+      ),
       body: _isLoading 
           ? const Center(child: CircularProgressIndicator()) 
           : _buildContent(),
