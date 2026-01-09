@@ -9,6 +9,7 @@
 .history
 .svn/
 scripts/upload_exercises.py
+.gemini
 
 # IntelliJ
 .idea/
