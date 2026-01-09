@@ -1,47 +1,70 @@
 import 'dart:async';
-import 'dart:io'; // ✅ NEW: For Platform check
+import 'dart:io'; 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart'; // ✅ NEW: For kIsWeb
+import 'package:provider/provider.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'dart:async';
+import 'dart:io'; 
+import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart'; // ✅ NEW: For Windows DB
+import 'package:sqflite_common_ffi/sqflite_ffi.dart'; 
+import 'package:sqflite_common_ffi_web/sqflite_ffi_web.dart'; // ✅ Web DB
 
 import 'services/database_service.dart';
 import 'services/gemini_service.dart';
 import 'services/logger_service.dart';
 import 'services/auth_service.dart';
 import 'services/sync_service.dart'; 
-import 'services/social_service.dart'; // Ensure this is imported
+import 'services/social_service.dart'; 
 import 'theme.dart';
 import 'screens/home_screen.dart'; 
 
 Future<void> main() async {
   runZonedGuarded(() async {
+    print("🚀 App Starting...");
     WidgetsFlutterBinding.ensureInitialized();
+    print("✅ Widgets Binding Initialized");
     await LoggerService().init();
+    print("✅ Logger Initialized");
 
-    // ✅ NEW: Initialize Database for Windows/Desktop
-    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+    if (kIsWeb) {
+      print("🌐 Initializing Web Database...");
+      // Using the more explicit web initialization
+      databaseFactory = databaseFactoryFfiWeb;
+    } else if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      print("📦 Initializing FFI Database...");
       sqfliteFfiInit();
       databaseFactory = databaseFactoryFfi;
     }
 
     try {
-      await dotenv.load(fileName: ".env");
+      print("📄 Loading app.env...");
+      await dotenv.load(fileName: "app.env");
+      print("✅ app.env Loaded");
       
+      final url = dotenv.env['SUPABASE_URL'];
+      final key = dotenv.env['SUPABASE_ANON_KEY'];
+      
+      if (url == null || key == null) {
+        throw Exception("Missing Supabase URL or Anon Key in app.env");
+      }
+
+      print("🔗 Initializing Supabase...");
       await Supabase.initialize(
-        url: dotenv.env['SUPABASE_URL']!,
-        anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
+        url: url,
+        anonKey: key,
       );
+      print("✅ Supabase Initialized");
     } catch (e, stack) {
+      print("❌ Initialization Error: $e");
       LoggerService().log("Startup Error", e, stack);
     }
 
-    FlutterError.onError = (FlutterErrorDetails details) {
-      LoggerService().log("Flutter Error", details.exception, details.stack);
-      FlutterError.presentError(details);
-    };
-
+    print("🏃 Running App...");
     runApp(
       MultiProvider(
         providers: [

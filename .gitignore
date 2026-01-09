@@ -55,3 +55,4 @@ web/icons/Icon-512.png
 **/exercises/
 scripts/
 .env
+app.env

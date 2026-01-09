@@ -17,18 +17,29 @@ class GymSelector extends StatelessWidget {
         if (!snapshot.hasData) return const SizedBox.shrink();
         
         final gyms = snapshot.data!;
-        // Determine active gym (or default)
+        
+        // ✅ FIXED: Safely handle empty list
+        if (gyms.isEmpty) {
+          return const Card(
+            child: ListTile(
+              leading: Icon(Icons.warning, color: Colors.orange),
+              title: Text("No Gym Profile Found"),
+              subtitle: Text("Please create one in settings."),
+            ),
+          );
+        }
+
         // Determine active gym (or default)
         GymProfile activeGym;
         if (db.currentGymId != null) {
-          activeGym = gyms.firstWhere((g) => g.id == db.currentGymId, orElse: () => gyms.first);
+          activeGym = gyms.firstWhere(
+            (g) => g.id == db.currentGymId, 
+            orElse: () => gyms.first
+          );
         } else {
-          // FIXED: Added required 'ownerId' parameter
           activeGym = gyms.firstWhere(
             (g) => g.isDefault, 
-            orElse: () => gyms.isNotEmpty 
-              ? gyms.first 
-              : GymProfile(id: '0', name: 'Loading...', ownerId: 'unknown') 
+            orElse: () => gyms.first
           );
         }
 

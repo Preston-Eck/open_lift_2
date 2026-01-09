@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 import 'dart:convert';
@@ -43,25 +44,41 @@ class DatabaseService extends ChangeNotifier {
   }
 
   Future<Database> _initDB(String fileName) async {
-    final dbPath = await getDatabasesPath();
-    final path = join(dbPath, fileName);
+    String path;
+    if (kIsWeb) {
+      path = fileName;
+    } else {
+      final dbPath = await getDatabasesPath();
+      path = join(dbPath, fileName);
+    }
 
-    return await openDatabase(
-      path,
-      version: 16,
-      onCreate: (db, version) async {
-        await _createTables(db);
-        await _createProfileTable(db);
-      },
-      onOpen: (db) async {
-        await _cleanupGhostSessions(db);
+        return await openDatabase(
+          path,
+          version: 17,
+          onCreate: (db, version) async {
+            await _createTables(db);
+            await _createProfileTable(db);
+            
+            // ✅ NEW: Initialize default gym for fresh installs
+            final defaultGymId = const Uuid().v4();
+            await db.insert('gym_profiles', {
+              'id': defaultGymId,
+              'name': 'Main Gym',
+              'is_default': 1,
+              'created_at': DateTime.now().toIso8601String(),
+              'owner_id': _currentUserId ?? 'guest',
+              'last_updated': DateTime.now().toIso8601String(),
+              'synced': 0,
+            });
+          },
+          onOpen: (db) async {        await _cleanupGhostSessions(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 12) {
           try {
             await db.execute('ALTER TABLE user_equipment ADD COLUMN capabilities_json TEXT');
             await db.execute('ALTER TABLE custom_exercises ADD COLUMN equipment_json TEXT');
-          } catch (_) {}
+          } catch (_) {} 
         }
         if (oldVersion < 13) await _createProfileTable(db);
         if (oldVersion < 14) {
@@ -70,14 +87,13 @@ class DatabaseService extends ChangeNotifier {
             await db.execute('ALTER TABLE user_equipment ADD COLUMN synced INTEGER DEFAULT 0');
             await db.execute('ALTER TABLE custom_exercises ADD COLUMN last_updated TEXT');
             await db.execute('ALTER TABLE custom_exercises ADD COLUMN synced INTEGER DEFAULT 0');
-          } catch (_) {}
+          } catch (_) {} 
         }
         if (oldVersion < 15) {
           debugPrint("⚡ Migrating to v15: Gym Profiles...");
           await db.execute('CREATE TABLE gym_profiles (id TEXT PRIMARY KEY, name TEXT, is_default INTEGER, created_at TEXT)');
           await db.execute('CREATE TABLE gym_equipment (gym_id TEXT, equipment_id TEXT, PRIMARY KEY (gym_id, equipment_id))');
           
-          // Auto-migrate existing items to a default gym
           final defaultGymId = const Uuid().v4();
           await db.insert('gym_profiles', {
             'id': defaultGymId,
@@ -98,7 +114,6 @@ class DatabaseService extends ChangeNotifier {
             await batch.commit(noResult: true);
           }
         }
-        // ⚡ v16 Migration: Shared Gyms
         if (oldVersion < 16) {
           debugPrint("⚡ Migrating to v16: Shared Gyms...");
           try {
@@ -106,7 +121,7 @@ class DatabaseService extends ChangeNotifier {
             if (_currentUserId != null) {
               await db.execute("UPDATE gym_profiles SET owner_id = ?", [_currentUserId]);
             }
-          } catch (_) {}
+          } catch (_) {} 
 
           await db.execute('''
             CREATE TABLE gym_members (
@@ -119,15 +134,13 @@ class DatabaseService extends ChangeNotifier {
             )
           ''');
         }
-        // ⚡ v17 Migration: Gym Sync
         if (oldVersion < 17) {
            debugPrint("⚡ Migrating to v17: Gym Sync...");
            try {
              await db.execute('ALTER TABLE gym_profiles ADD COLUMN last_updated TEXT');
              await db.execute('ALTER TABLE gym_profiles ADD COLUMN synced INTEGER DEFAULT 0');
-             // Initialize existing gyms as unsynced so they push
              await db.execute("UPDATE gym_profiles SET last_updated = ?, synced = 0", [DateTime.now().toIso8601String()]);
-           } catch (_) {}
+           } catch (_) {} 
         }
       }
     );
@@ -144,7 +157,6 @@ class DatabaseService extends ChangeNotifier {
     await db.execute('CREATE TABLE workout_sessions (id TEXT PRIMARY KEY, plan_id TEXT, day_name TEXT, start_time TEXT, end_time TEXT, note TEXT)');
     await db.execute('CREATE TABLE exercise_aliases (original_name TEXT PRIMARY KEY, alias TEXT)');
     
-    // v16 Structure
     await db.execute('CREATE TABLE gym_profiles (id TEXT PRIMARY KEY, name TEXT, is_default INTEGER, created_at TEXT, owner_id TEXT, last_updated TEXT, synced INTEGER DEFAULT 0)');
     await db.execute('CREATE TABLE gym_equipment (gym_id TEXT, equipment_id TEXT, PRIMARY KEY (gym_id, equipment_id))');
     await db.execute('CREATE TABLE gym_members (id TEXT PRIMARY KEY, gym_id TEXT, user_id TEXT, nickname TEXT, can_edit_gear INTEGER DEFAULT 0, status TEXT)');
@@ -157,28 +169,20 @@ class DatabaseService extends ChangeNotifier {
   Future<void> _cleanupGhostSessions(Database db) async {
     try {
       await db.execute("DELETE FROM workout_sessions WHERE id NOT IN (SELECT DISTINCT session_id FROM workout_logs WHERE session_id IS NOT NULL) AND end_time IS NULL AND start_time < datetime('now', '-1 hour')");
-    } catch (_) {}
+    } catch (_) {} 
   }
 
   // --- GYM PROFILES ---
 
   Future<List<GymProfile>> getGymProfiles() async {
     final db = await database;
-    
-    // 1. Fetch Gyms I Own
     final owned = await db.query('gym_profiles', where: 'owner_id = ?', whereArgs: [_currentUserId]);
-    
-    // 2. Fetch Gyms Shared with Me
     final memberRows = await db.query('gym_members', where: 'user_id = ?', whereArgs: [_currentUserId]);
     
     List<GymProfile> allGyms = [];
-
-    // Process Owned
     for (var row in owned) {
       allGyms.add(GymProfile.fromMap(row, currentUserId: _currentUserId));
     }
-
-    // Process Shared
     for (var mRow in memberRows) {
       final gymId = mRow['gym_id'] as String;
       final gymRes = await db.query('gym_profiles', where: 'id = ?', whereArgs: [gymId]);
@@ -212,9 +216,7 @@ class DatabaseService extends ChangeNotifier {
     final db = await database;
     final gym = await db.query('gym_profiles', where: 'id = ?', whereArgs: [gymId]);
     if (gym.isEmpty) return;
-    
     final ownerId = gym.first['owner_id'] as String?;
-    
     if (ownerId == _currentUserId) {
       await db.update('gym_profiles', {
         'name': newName,
@@ -231,9 +233,7 @@ class DatabaseService extends ChangeNotifier {
     final db = await database;
     final gym = await db.query('gym_profiles', where: 'id = ?', whereArgs: [id]);
     if (gym.isEmpty) return;
-    
     final ownerId = gym.first['owner_id'] as String?;
-
     if (ownerId == _currentUserId) {
       await db.delete('gym_profiles', where: 'id = ?', whereArgs: [id]);
       await db.delete('gym_equipment', where: 'gym_id = ?', whereArgs: [id]);
@@ -258,14 +258,12 @@ class DatabaseService extends ChangeNotifier {
         return [];
       }
     }
-
     final res = await db.rawQuery('''
       SELECT e.name, e.capabilities_json 
       FROM user_equipment e
       JOIN gym_equipment ge ON e.id = ge.equipment_id
       WHERE ge.gym_id = ?
     ''', [targetGymId]);
-
     final Set<String> capabilities = {};
     for (var row in res) {
       capabilities.add(row['name'] as String);
@@ -273,7 +271,7 @@ class DatabaseService extends ChangeNotifier {
         try {
           final List<dynamic> tags = jsonDecode(row['capabilities_json'] as String);
           capabilities.addAll(tags.map((e) => e.toString()));
-        } catch (_) {}
+        } catch (_) {} 
       }
     }
     return capabilities.toList();
@@ -292,13 +290,10 @@ class DatabaseService extends ChangeNotifier {
     } else {
       await db.delete('gym_equipment', where: 'gym_id = ? AND equipment_id = ?', whereArgs: [gymId, equipmentId]);
     }
-    
-    // Trigger Sync for Gym Profile
     await db.update('gym_profiles', {
       'last_updated': DateTime.now().toIso8601String(),
       'synced': 0
     }, where: 'id = ?', whereArgs: [gymId]);
-
     if (isEnabled) await updateEquipment(equipmentId, true);
     notifyListeners();
   }
@@ -354,7 +349,7 @@ class DatabaseService extends ChangeNotifier {
   }
 
 
-  // --- OTHER CRUD (Preserved) ---
+  // ---OTHER CRUD ---
   Future<void> addCustomExercise(Exercise ex) async {
     final db = await database;
     final now = DateTime.now().toIso8601String();
@@ -369,7 +364,7 @@ class DatabaseService extends ChangeNotifier {
     final res = await db.query('custom_exercises');
     return res.map((e) {
       List<String> eq = [];
-      if (e['equipment_json'] != null) { try { eq = List<String>.from(jsonDecode(e['equipment_json'] as String)); } catch (_) {} }
+      if (e['equipment_json'] != null) { try { eq = List<String>.from(jsonDecode(e['equipment_json'] as String)); } catch (_) {} } 
       return Exercise(id: e['id'] as String, name: e['name'] as String, category: e['category'] as String?, primaryMuscles: (e['primary_muscles'] as String).split(','), secondaryMuscles: [], equipment: eq, instructions: [(e['notes'] as String?) ?? ''], images: []);
     }).toList();
   }
@@ -387,7 +382,7 @@ class DatabaseService extends ChangeNotifier {
     final e = res.first;
     List<String> eq = [];
     if (e['equipment_json'] != null) {
-      try { eq = List<String>.from(jsonDecode(e['equipment_json'] as String)); } catch (_) {}
+      try { eq = List<String>.from(jsonDecode(e['equipment_json'] as String)); } catch (_) {} 
     }
     return Exercise(
       id: e['id'] as String,
@@ -449,8 +444,8 @@ class DatabaseService extends ChangeNotifier {
   Future<List<BodyMetric>> getBodyMetrics() async { final db = await database; final res = await db.query('body_metrics', orderBy: 'date DESC'); return res.map((e) { Map<String, double> meas = {}; if (e['measurements_json'] != null) { try { (jsonDecode(e['measurements_json'] as String) as Map).forEach((k, v) => meas[k] = (v as num).toDouble()); } catch (_) {} } return BodyMetric(id: e['id'] as String, date: DateTime.parse(e['date'] as String), weight: e['weight'] as double?, measurements: meas); }).toList(); }
   
   // Profile
-  Future<void> updateUserProfile(Map<String, dynamic> d) async { final db = await database; final ex = await getUserProfile(); if (ex == null) { d['id'] = 'user_profile'; await db.insert('user_profile', d); } else { await db.update('user_profile', d, where: 'id = ?', whereArgs: ['user_profile']); } notifyListeners(); }
-  Future<Map<String, dynamic>?> getUserProfile() async { final db = await database; final res = await db.query('user_profile', limit: 1); return res.isNotEmpty ? res.first : null; }
+  Future<void>updateUserProfile(Map<String, dynamic> d) async { final db = await database; final ex = await getUserProfile(); if (ex == null) { d['id'] = 'user_profile'; await db.insert('user_profile', d); } else { await db.update('user_profile', d, where: 'id = ?', whereArgs: ['user_profile']); } notifyListeners(); }
+  Future<Map<String, dynamic>?> getUserProfile() async { final db = await database; final res = await db.query('user_profile', limit: 1); return res.isNotEmpty ? res.first : null; } 
   
   // Aliases
   Future<Map<String, String>> getAliases() async { final db = await database; final res = await db.query('exercise_aliases'); Map<String, String> m = {}; for (var r in res) { m[r['original_name'] as String] = r['alias'] as String; } return m; }
