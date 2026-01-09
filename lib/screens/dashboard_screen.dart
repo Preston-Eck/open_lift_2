@@ -4,10 +4,11 @@ import 'saved_plans_screen.dart';
 import 'global_search_screen.dart';
 import 'wiki_screen.dart';
 import 'analytics_screen.dart';
-import 'plan_generator_screen.dart';
 import 'body_metrics_screen.dart';
 import 'strength_profile_screen.dart';
 import '../services/database_service.dart';
+import '../widgets/onboarding_progress_widget.dart';
+import 'ai_coach_screen.dart'; // NEW
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -74,6 +75,10 @@ class DashboardHome extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Onboarding Guide (Hides when complete)
+            const OnboardingProgressWidget(),
+            const SizedBox(height: 20),
+
             // Welcome / Quick Actions
             const Text("Quick Actions", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
             const SizedBox(height: 10),
@@ -85,7 +90,7 @@ class DashboardHome extends StatelessWidget {
                     "AI Coach", 
                     Icons.auto_awesome, 
                     Colors.purple, 
-                    const PlanGeneratorScreen()
+                    const AICoachScreen()
                   )
                 ),
                 const SizedBox(width: 10),

@@ -196,4 +196,65 @@ class GeminiService {
       return [];
     }
   }
+
+  /// AI Coach Chat
+  Future<String> chatWithCoach(
+    String userMessage, 
+    List<Map<String, String>> history, 
+    Map<String, dynamic> contextData
+  ) async {
+    // 1. Construct Context Block
+    final profile = contextData['profile'] ?? "Unknown";
+    final equipment = contextData['equipment'] ?? "Unknown";
+    final recentLogs = contextData['recent_logs'] ?? "No recent activity";
+    final strengthStats = contextData['strength_stats'] ?? "No data";
+
+    final systemPrompt = '''
+      You are "OpenLift Coach", an expert personal trainer and strength coach.
+      
+      === YOUR KNOWLEDGE BASE (USER CONTEXT) ===
+      PROFILE: $profile
+      AVAILABLE EQUIPMENT: $equipment
+      ESTIMATED 1RMs: $strengthStats
+      RECENT WORKOUTS (Last 5): $recentLogs
+      
+      === YOUR MISSION ===
+      1. Answer questions about fitness, form, programming, and nutrition.
+      2. Use the user's specific context (e.g., if they ask for a leg exercise, check their equipment first).
+      3. Be encouraging but direct. Focus on progressive overload and consistency.
+      4. If asked about their progress, reference their Recent Workouts or 1RMs.
+      
+      === STYLE ===
+      Concise, actionable, professional yet friendly. Avoid long preambles.
+    ''';
+
+    try {
+      // 2. Build History for the Model
+      final List<Content> chatHistory = [];
+      
+      // Add System Prompt as the first "model" turn context or just prepend to first user message.
+      // Gemini API supports 'system_instruction' in beta, but standard way is to prepend context.
+      
+      // We will prepend the system prompt to the current interaction context
+      // Reconstruct history
+      for (var msg in history) {
+        if (msg['role'] == 'user') {
+          chatHistory.add(Content.text(msg['content']!));
+        } else {
+          chatHistory.add(Content.model([TextPart(msg['content']!)]));
+        }
+      }
+
+      // Add the current message with system context prepended
+      final finalPrompt = "$systemPrompt\n\nUser Question: $userMessage";
+      chatHistory.add(Content.text(finalPrompt));
+
+      final response = await _model.generateContent(chatHistory);
+      return response.text ?? "I'm having trouble thinking right now. Try again?";
+      
+    } catch (e) {
+      debugPrint("AI Coach Error: $e");
+      return "I encountered an error connecting to the coaching server. Please check your internet connection.";
+    }
+  }
 }
