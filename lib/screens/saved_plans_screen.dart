@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+import 'dart:convert'; // NEW
+import 'package:share_plus/share_plus.dart'; // NEW
 import '../services/database_service.dart';
 import '../models/plan.dart';
 import '../models/session.dart';
@@ -21,7 +23,16 @@ class _SavedPlansScreenState extends State<SavedPlansScreen> {
     final db = Provider.of<DatabaseService>(context);
 
     return Scaffold(
-      appBar: AppBar(title: const Text("My Plans")),
+      appBar: AppBar(
+        title: const Text("My Plans"),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.download),
+            tooltip: "Import Plan",
+            onPressed: () => _importPlan(context, db),
+          ),
+        ],
+      ),
       body: FutureBuilder<List<WorkoutPlan>>(
         future: db.getPlans(),
         builder: (context, snapshot) {
@@ -43,6 +54,10 @@ class _SavedPlansScreenState extends State<SavedPlansScreen> {
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      IconButton(
+                        icon: const Icon(Icons.share, color: Colors.green), // SHARE BUTTON
+                        onPressed: () => _sharePlan(plan),
+                      ),
                       IconButton(
                         icon: const Icon(Icons.edit, color: Colors.grey),
                         onPressed: () async {
@@ -82,6 +97,90 @@ class _SavedPlansScreenState extends State<SavedPlansScreen> {
             },
           );
         },
+      ),
+    );
+  }
+
+  void _sharePlan(WorkoutPlan plan) {
+    try {
+      // 1. Serialize Plan
+      // We need a full toMap/toJson. Assuming WorkoutPlan has logic or we build it.
+      // DatabaseService saves it by creating a Map.
+      final jsonStr = jsonEncode({
+        'name': plan.name,
+        'goal': plan.goal,
+        'type': plan.type,
+        'days': plan.days.map((d) => d.toMap()).toList()
+      });
+      
+      final shareText = "OpenLift Plan JSON:\n$jsonStr";
+      // ignore: deprecated_member_use
+      Share.share(shareText, subject: "Workout Plan: ${plan.name}");
+      
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Share Error: $e")));
+      }
+    }
+  }
+
+  void _importPlan(BuildContext context, DatabaseService db) {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Import Plan"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text("Paste the JSON string here:"),
+            TextField(
+              controller: controller,
+              maxLines: 4,
+              decoration: const InputDecoration(border: OutlineInputBorder(), hintText: '{"name": ...}'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
+          ElevatedButton(
+            onPressed: () async {
+              try {
+                final text = controller.text.trim();
+                // Strip prefix if present
+                final cleanText = text.replaceAll("OpenLift Plan JSON:\n", "").trim();
+                
+                final Map<String, dynamic> data = jsonDecode(cleanText);
+                
+                // Construct Plan
+                final List<dynamic> daysRaw = data['days'] ?? [];
+                final List<WorkoutDay> days = daysRaw.map((d) => WorkoutDay.fromMap(d)).toList();
+                
+                final newPlan = WorkoutPlan(
+                  id: DateTime.now().millisecondsSinceEpoch.toString(), // Simple Unique ID
+                  name: "${data['name']} (Imported)",
+                  goal: data['goal'] ?? "Imported Plan",
+                  type: data['type'] ?? "Standard",
+                  days: days,
+                );
+                
+                await db.savePlan(newPlan);
+                
+                if (ctx.mounted) Navigator.pop(ctx);
+                
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Plan Imported Successfully!")));
+                  setState(() {});
+                }
+              } catch (e) {
+                if (mounted) {
+                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Invalid JSON: $e"), backgroundColor: Colors.red));
+                }
+              }
+            },
+            child: const Text("Import"),
+          )
+        ],
       ),
     );
   }

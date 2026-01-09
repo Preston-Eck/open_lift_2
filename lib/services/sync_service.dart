@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert' as import_convert; // MOVED TO TOP
+import 'package:uuid/uuid.dart'; // NEW
+import 'dart:convert' as import_convert;
 import 'database_service.dart';
 import 'auth_service.dart';
 
@@ -134,6 +135,48 @@ class SyncService {
         
         await _db.replaceGymEquipment(gymId, equipIds);
       }
+    }
+  }
+
+  // --- GYM SHARING ---
+
+  Future<void> joinGym(String gymId) async {
+    if (!_auth.isAuthenticated) throw Exception("User not logged in");
+    final userId = _auth.user!.id;
+
+    // Check if already a member
+    final check = await _supabase
+        .from('gym_members')
+        .select()
+        .eq('gym_id', gymId)
+        .eq('user_id', userId);
+    
+    if (check.isNotEmpty) return; // Already joined
+
+    // Insert Member
+    await _supabase.from('gym_members').insert({
+      'id': const Uuid().v4(), // Client-side ID generation
+      'gym_id': gymId,
+      'user_id': userId,
+      'nickname': 'My Gym (Joined)',
+      'status': 'accepted'
+    });
+
+    // Trigger Pull immediately
+    await _pullGymProfiles('1970-01-01T00:00:00.000Z');
+  }
+
+  Future<List<Map<String, dynamic>>> getGymMembers(String gymId) async {
+    // This requires a view or RLS policy that allows reading members of a gym you are in
+    try {
+      final response = await _supabase
+          .from('gym_members')
+          .select('id, user_id, nickname, status')
+          .eq('gym_id', gymId);
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      debugPrint("Fetch Members Error: $e");
+      return [];
     }
   }
 

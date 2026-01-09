@@ -1,3 +1,6 @@
+import 'package:flutter/services.dart'; // For Clipboard
+
+// ... imports below
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -21,6 +24,7 @@ class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> with Si
   Set<String> _gymEnabledItems = {}; // Changed from _ownedStandardItems
   List<Map<String, dynamic>> _customItems = [];
   String? _currentGymName; // Displayed for context
+  String? _currentGymId; // NEW: Store ID for sharing
 
   @override
   void initState() {
@@ -68,12 +72,95 @@ class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> with Si
           _gymEnabledItems = enabledSet;
           _customItems = customList;
           _currentGymName = currentGym.name;
+          _currentGymId = currentGymId; // Set ID
           _isLoading = false;
         });
       }
     } catch (e) {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  void _showShareDialog() {
+    if (_currentGymId == null) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Share Gym Profile"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text("Share this ID with a friend so they can join this gym and see the equipment."),
+            const SizedBox(height: 16),
+            SelectableText(
+              _currentGymId!,
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.copy),
+              label: const Text("Copy ID"),
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: _currentGymId!));
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Copied to clipboard")));
+              },
+            ),
+            const Divider(height: 32),
+            const Text("Or join a gym:", style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _showJoinDialog();
+              },
+              child: const Text("Join via ID"),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Close")),
+        ],
+      ),
+    );
+  }
+
+  void _showJoinDialog() {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Join a Gym"),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: "Enter Gym ID", border: OutlineInputBorder()),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
+          ElevatedButton(
+            onPressed: () async {
+              if (controller.text.isNotEmpty) {
+                final syncService = context.read<SyncService>(); // Get service before async
+                try {
+                  await syncService.joinGym(controller.text.trim());
+                  if (ctx.mounted) { // Check ctx (dialog context) or use 'mounted'
+                    Navigator.pop(ctx);
+                  }
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Successfully Joined Gym!")));
+                    _loadData();
+                  }
+                } catch (e) {
+                  if (mounted) {
+                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red));
+                  }
+                }
+              }
+            },
+            child: const Text("Join"),
+          ),
+        ],
+      ),
+    );
   }
 
   void _toggleStandardItem(String name, bool value) async {
@@ -133,6 +220,12 @@ class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> with Si
               Text("Editing: $_currentGymName", style: const TextStyle(fontSize: 12, color: Colors.grey)),
           ],
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.share, color: AppTheme.renewalTeal),
+            onPressed: _showShareDialog,
+          ),
+        ],
         bottom: TabBar(
           controller: _tabController,
           labelColor: AppTheme.renewalTeal,
