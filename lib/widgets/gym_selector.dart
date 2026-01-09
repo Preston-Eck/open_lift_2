@@ -18,11 +18,18 @@ class GymSelector extends StatelessWidget {
         
         final gyms = snapshot.data!;
         // Determine active gym (or default)
+        // Determine active gym (or default)
         GymProfile activeGym;
         if (db.currentGymId != null) {
           activeGym = gyms.firstWhere((g) => g.id == db.currentGymId, orElse: () => gyms.first);
         } else {
-          activeGym = gyms.firstWhere((g) => g.isDefault, orElse: () => gyms.isNotEmpty ? gyms.first : GymProfile(id: '0', name: 'Loading...'));
+          // FIXED: Added required 'ownerId' parameter
+          activeGym = gyms.firstWhere(
+            (g) => g.isDefault, 
+            orElse: () => gyms.isNotEmpty 
+              ? gyms.first 
+              : GymProfile(id: '0', name: 'Loading...', ownerId: 'unknown') 
+          );
         }
 
         return Card(

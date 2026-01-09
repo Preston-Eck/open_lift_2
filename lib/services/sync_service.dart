@@ -35,6 +35,11 @@ class SyncService {
       await _pullEquipment(lastSyncTime);
       await _pushCustomExercises();
       await _pullCustomExercises(lastSyncTime);
+      
+      // NEW: Sync Gym Profiles (v17)
+      await _pushGymProfiles();
+      await _pullGymProfiles(lastSyncTime);
+
       await _pushPlans();
       await _pullPlans(); 
       await _pushLogs();
@@ -44,6 +49,91 @@ class SyncService {
       debugPrint("✅ Sync Complete.");
     } catch (e) {
       debugPrint("❌ Sync Error: $e");
+    }
+  }
+
+  // --- GYM PROFILES SYNC ---
+
+  Future<void> _pushGymProfiles() async {
+    final userId = _auth.user!.id;
+    final unsynced = await _db.getUnsyncedGymProfiles();
+
+    if (unsynced.isEmpty) return;
+
+    for (var gym in unsynced) {
+      final gymId = gym['id'] as String;
+      
+      // 1. Push Profile Metadata
+      final profileData = {
+        'id': gymId,
+        'owner_id': userId,
+        'name': gym['name'],
+        'is_default': gym['is_default'],
+        'created_at': gym['created_at'],
+        'updated_at': gym['last_updated'] ?? DateTime.now().toIso8601String(),
+      };
+      
+      await _supabase.from('gym_profiles').upsert(profileData);
+
+      // 2. Push Equipment List (Full Replace Strategy)
+      // fetch local items
+      final equipmentIds = await _db.getGymItemIds(gymId);
+      
+      // Delete existing on remote (simulated replace)
+      await _supabase.from('gym_equipment').delete().eq('gym_id', gymId);
+      
+      // Insert current
+      if (equipmentIds.isNotEmpty) {
+        final equipBatch = equipmentIds.map((eid) => {
+          'gym_id': gymId,
+          'equipment_id': eid
+        }).toList();
+        await _supabase.from('gym_equipment').upsert(equipBatch);
+      }
+    }
+
+    await _db.markGymProfilesSynced(unsynced.map((e) => e['id'] as String).toList());
+  }
+
+  Future<void> _pullGymProfiles(String lastSyncTime) async {
+    final userId = _auth.user!.id;
+    
+    // 1. Get Changed Profiles
+    final response = await _supabase
+        .from('gym_profiles')
+        .select()
+        .eq('owner_id', userId)
+        .gt('updated_at', lastSyncTime);
+
+    if (response.isNotEmpty) {
+      final List<Map<String, dynamic>> localBatch = [];
+      for (var row in response) {
+        localBatch.add({
+          'id': row['id'],
+          'name': row['name'],
+          'is_default': row['is_default'],
+          'created_at': row['created_at'],
+          'owner_id': row['owner_id'],
+          'last_updated': row['updated_at'],
+        });
+      }
+      await _db.bulkUpsertGymProfiles(localBatch);
+      
+      // 2. For each updated gym, fetch its equipment list
+      for (var row in response) {
+        final gymId = row['id'] as String;
+        final equipResponse = await _supabase
+            .from('gym_equipment')
+            .select('equipment_id')
+            .eq('gym_id', gymId);
+            
+        final List<String> equipIds = [];
+        for (var eRow in equipResponse) {
+          equipIds.add(eRow['equipment_id'] as String);
+        }
+        
+        await _db.replaceGymEquipment(gymId, equipIds);
+      }
     }
   }
 
