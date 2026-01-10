@@ -115,4 +115,104 @@ class SocialService {
       return [];
     }
   }
+
+  // --- INBOX & NOTIFICATIONS (v1.1.0) ---
+
+  Future<List<Map<String, dynamic>>> getNotifications() async {
+    final myId = _auth.user!.id;
+    final response = await _supabase
+        .from('notifications')
+        .select()
+        .eq('user_id', myId)
+        .order('created_at', ascending: false);
+    return List<Map<String, dynamic>>.from(response);
+  }
+
+  Future<void> markNotificationRead(String id) async {
+    await _supabase.from('notifications').update({'is_read': true}).eq('id', id);
+  }
+
+  Future<void> deleteNotification(String id) async {
+    await _supabase.from('notifications').delete().eq('id', id);
+  }
+
+  Future<void> sendGymInvite(String gymId, String gymName, String friendId) async {
+    final myId = _auth.user!.id;
+    final myName = _auth.profile?['username'] ?? 'A friend';
+
+    // 1. Create Pending Member Entry
+    await _supabase.from('gym_members').insert({
+      'id': _uuid(),
+      'gym_id': gymId,
+      'user_id': friendId,
+      'nickname': 'Pending Member',
+      'status': 'pending',
+      'invited_by': myId
+    });
+
+    // 2. Send Notification
+    await _supabase.from('notifications').insert({
+      'user_id': friendId,
+      'type': 'gym_invite',
+      'payload_json': {'gym_id': gymId, 'gym_name': gymName, 'inviter_name': myName},
+      'is_read': false,
+    });
+  }
+
+  Future<void> sharePlan(Map<String, dynamic> planData, String friendId) async {
+    final myName = _auth.profile?['username'] ?? 'A friend';
+    
+    await _supabase.from('notifications').insert({
+      'user_id': friendId,
+      'type': 'plan_share',
+      'payload_json': {
+        'plan_name': planData['name'],
+        'plan_data': planData, // Embed full JSON for import
+        'sender_name': myName
+      },
+      'is_read': false,
+    });
+  }
+
+  // --- ACTIVITY FEED (v1.1.0) ---
+
+  Future<List<Map<String, dynamic>>> getFriendActivity() async {
+    final friends = await getFriends();
+    final friendIds = friends.map((f) => f['friend_id']).toList();
+    if (friendIds.isEmpty) return [];
+
+    // Fetch logs from friends
+    final response = await _supabase
+        .from('logs')
+        .select('*, profiles(username, avatar_url)')
+        .in_('owner_id', friendIds)
+        .order('timestamp', ascending: false)
+        .limit(50);
+        
+    return List<Map<String, dynamic>>.from(response);
+  }
+
+  Future<void> toggleLike(String logId) async {
+    final myId = _auth.user!.id;
+    // Check if liked
+    final existing = await _supabase
+        .from('workout_likes')
+        .select()
+        .eq('log_id', logId) // Assuming schema links to log_id, or session_id depending on granularity
+        .eq('user_id', myId);
+        
+    if (existing.isNotEmpty) {
+      await _supabase.from('workout_likes').delete().eq('id', existing.first['id']);
+    } else {
+      await _supabase.from('workout_likes').insert({
+        'log_id': logId,
+        'user_id': myId,
+      });
+    }
+  }
+
+  // Helper
+  String _uuid() {
+    return DateTime.now().millisecondsSinceEpoch.toString(); // Simple ID for now
+  }
 }

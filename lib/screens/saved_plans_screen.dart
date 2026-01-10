@@ -4,6 +4,8 @@ import 'package:intl/intl.dart';
 import 'dart:convert'; // NEW
 import 'package:share_plus/share_plus.dart'; // NEW
 import '../services/database_service.dart';
+import '../services/social_service.dart'; // NEW
+import '../widgets/user_picker_dialog.dart'; // NEW
 import '../models/plan.dart';
 import '../models/session.dart';
 import '../models/log.dart';
@@ -54,9 +56,16 @@ class _SavedPlansScreenState extends State<SavedPlansScreen> {
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      IconButton(
-                        icon: const Icon(Icons.share, color: Colors.green), // SHARE BUTTON
-                        onPressed: () => _sharePlan(plan),
+                      PopupMenuButton<String>(
+                        icon: const Icon(Icons.share, color: Colors.green),
+                        onSelected: (val) {
+                          if (val == 'friend') _shareWithFriend(plan);
+                          if (val == 'json') _shareJson(plan);
+                        },
+                        itemBuilder: (ctx) => [
+                          const PopupMenuItem(value: 'friend', child: Text("Send to Friend")),
+                          const PopupMenuItem(value: 'json', child: Text("Share JSON")),
+                        ],
                       ),
                       IconButton(
                         icon: const Icon(Icons.edit, color: Colors.grey),
@@ -101,7 +110,26 @@ class _SavedPlansScreenState extends State<SavedPlansScreen> {
     );
   }
 
-  void _sharePlan(WorkoutPlan plan) {
+  Future<void> _shareWithFriend(WorkoutPlan plan) async {
+    final friendId = await showDialog<String>(
+      context: context,
+      builder: (ctx) => const UserPickerDialog(title: "Send Plan To..."),
+    );
+
+    if (friendId != null && mounted) {
+       final planData = {
+        'name': plan.name,
+        'goal': plan.goal,
+        'type': plan.type,
+        'schedule_json': jsonEncode(plan.days.map((d) => d.toMap()).toList())
+      };
+      
+      await context.read<SocialService>().sharePlan(planData, friendId);
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Plan sent!")));
+    }
+  }
+
+  void _shareJson(WorkoutPlan plan) {
     try {
       // 1. Serialize Plan
       // We need a full toMap/toJson. Assuming WorkoutPlan has logic or we build it.

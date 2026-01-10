@@ -70,10 +70,34 @@ class _AICoachScreenState extends State<AICoachScreen> {
     });
     _scrollToBottom();
 
+    final db = Provider.of<DatabaseService>(context, listen: false);
     final gemini = Provider.of<GeminiService>(context, listen: false);
     
+    // RAG: Check if user is asking about a specific exercise
+    String specificHistory = "";
+    try {
+      final exercises = await db.getMostFrequentExercises();
+      for (var ex in exercises) {
+        final name = ex['exercise_name'] as String;
+        if (text.toLowerCase().contains(name.toLowerCase())) {
+          final history = await db.getHistoryForExercise(name);
+          specificHistory += "\nHistory for $name:\n" + 
+            history.take(20).map((l) => "${l.timestamp.substring(0,10)}: ${l.weight}x${l.reps} (Vol: ${l.volumeLoad})").join('\n');
+          break; // Found one, stop for now to keep context window clean
+        }
+      }
+    } catch (e) {
+      debugPrint("RAG Error: $e");
+    }
+
+    // Merge RAG into context
+    final currentContext = Map<String, dynamic>.from(_contextData);
+    if (specificHistory.isNotEmpty) {
+      currentContext['specific_history'] = specificHistory;
+    }
+
     // Call API
-    final response = await gemini.chatWithCoach(text, _messages, _contextData);
+    final response = await gemini.chatWithCoach(text, _messages, currentContext);
 
     if (mounted) {
       setState(() {

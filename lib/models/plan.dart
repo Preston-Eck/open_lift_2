@@ -80,6 +80,8 @@ class WorkoutExercise {
   final int restSeconds;
   final String? intensity;
   final int secondsPerSet;
+  final String metricType; // 'weight_reps', 'time', 'amrap'
+  final String? circuitGroupId; // For supersets (A1, A2, etc.)
 
   WorkoutExercise({
     required this.name,
@@ -88,6 +90,8 @@ class WorkoutExercise {
     required this.restSeconds,
     this.intensity,
     this.secondsPerSet = 0,
+    this.metricType = 'weight_reps',
+    this.circuitGroupId,
   });
 
   Map<String, dynamic> toMap() => {
@@ -97,6 +101,8 @@ class WorkoutExercise {
     'restSeconds': restSeconds,
     'intensity': intensity,
     'secondsPerSet': secondsPerSet,
+    'metricType': metricType,
+    'circuitGroupId': circuitGroupId,
   };
 
   factory WorkoutExercise.fromMap(Map<String, dynamic> map) {
@@ -107,6 +113,8 @@ class WorkoutExercise {
       restSeconds: map['restSeconds'] ?? 60,
       intensity: map['intensity'],
       secondsPerSet: map['secondsPerSet'] ?? 0,
+      metricType: map['metricType'] ?? 'weight_reps',
+      circuitGroupId: map['circuitGroupId'],
     );
   }
 }

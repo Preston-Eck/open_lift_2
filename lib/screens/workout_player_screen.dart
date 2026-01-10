@@ -1,13 +1,12 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:audioplayers/audioplayers.dart';
-import 'package:wakelock_plus/wakelock_plus.dart';
-import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:uuid/uuid.dart';
 import 'package:supabase_flutter/supabase_flutter.dart'; 
 import '../services/database_service.dart';
 import '../services/logger_service.dart';
+import '../services/workout_player_service.dart'; 
+import '../services/realtime_service.dart'; // NEW
 import '../models/log.dart';
 import '../models/plan.dart';
 import '../models/exercise.dart';
@@ -18,12 +17,14 @@ class WorkoutPlayerScreen extends StatefulWidget {
   final WorkoutDay? workoutDay;
   final String? planId;
   final bool isHiit;
+  final String? versusRoomId; // NEW: If provided, enable Versus mode
 
   const WorkoutPlayerScreen({
     super.key, 
     this.workoutDay, 
     this.planId, 
-    this.isHiit = false
+    this.isHiit = false,
+    this.versusRoomId,
   });
 
   @override
@@ -32,194 +33,347 @@ class WorkoutPlayerScreen extends StatefulWidget {
 
 class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
   late String _sessionId;
-  Timer? _sessionTimer;
-  int _sessionSeconds = 0;
-  bool _isPaused = false;
-  
-  Timer? _restTimer;
-  int _restSeconds = 0;
-  bool _isResting = false;
-
   Map<String, String> _aliases = {}; 
   Map<String, double> _oneRepMaxes = {}; 
-  Map<String, String> _oneRepDates = {};
+
+  // Sequential Flow Data
+  List<WorkoutExercise> _flatFlow = []; 
+  int _currentStepIndex = 0;
+  double _sessionTotalTonnage = 0; // NEW
+
+  // Controllers for current set
+  final TextEditingController _weightController = TextEditingController();
+  final TextEditingController _repsController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    // CRITICAL FIX: Generate ID synchronously so it's ready for the build method immediately.
     _sessionId = const Uuid().v4(); 
     _initSession();
     _loadData();
+    _generateFlatFlow();
+    
+    // Auto-start the service
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<WorkoutPlayerService>().startWorkout();
+      
+      // Start Versus Mode if room ID exists
+      if (widget.versusRoomId != null) {
+        context.read<RealtimeService>().joinVersus(widget.versusRoomId!);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    // Leave versus mode on exit
+    if (widget.versusRoomId != null) {
+      context.read<RealtimeService>().leaveVersus();
+    }
+    super.dispose();
+  }
+
+  void _logSet(WorkoutExercise ex) {
+    final weight = double.tryParse(_weightController.text) ?? 0.0;
+    final reps = int.tryParse(_repsController.text) ?? 0;
+    final setTonnage = weight * reps;
+
+    final log = LogEntry(
+      id: const Uuid().v4(),
+      exerciseId: ex.name,
+      exerciseName: ex.name,
+      weight: weight,
+      reps: reps,
+      volumeLoad: setTonnage,
+      duration: 0, 
+      timestamp: DateTime.now().toIso8601String(),
+      sessionId: _sessionId,
+    );
+
+    context.read<DatabaseService>().logSet(log);
+    
+    // Update local tonnage and broadcast
+    setState(() {
+      _sessionTotalTonnage += setTonnage;
+    });
+
+    if (widget.versusRoomId != null) {
+      context.read<RealtimeService>().broadcastTonnage(widget.versusRoomId!, _sessionTotalTonnage);
+    }
+    
+    // Clear for next set
+    _repsController.clear();
+  }
+
+  void _generateFlatFlow() {
+    if (widget.workoutDay == null) return;
+    final exercises = widget.workoutDay!.exercises;
+    
+    // Group by circuitGroupId
+    // For MVP: We process them in groups as they appear in the list.
+    // If consecutive exercises have same group ID, we interleave.
+    
+    List<WorkoutExercise> flow = [];
+    int i = 0;
+    while (i < exercises.length) {
+      final current = exercises[i];
+      if (current.circuitGroupId != null && current.circuitGroupId!.isNotEmpty) {
+        // Find all in this group
+        final groupId = current.circuitGroupId;
+        final group = exercises.skip(i).takeWhile((e) => e.circuitGroupId == groupId).toList();
+        
+        // Interleave sets
+        int maxSets = group.map((e) => e.sets).reduce((a, b) => a > b ? a : b);
+        for (int s = 0; s < maxSets; s++) {
+          for (var ex in group) {
+            if (s < ex.sets) flow.add(ex);
+          }
+        }
+        i += group.length;
+      } else {
+        // Just add all sets for this exercise
+        for (int s = 0; s < current.sets; s++) {
+          flow.add(current);
+        }
+        i++;
+      }
+    }
+    _flatFlow = flow;
   }
 
   Future<void> _initSession() async {
-    try {
-      await WakelockPlus.enable().catchError((_) {});
-      
-      if (widget.workoutDay != null) {
-        final session = WorkoutSession(
-          id: _sessionId,
-          planId: widget.planId ?? 'unknown',
-          dayName: widget.workoutDay!.name,
-          startTime: DateTime.now(),
-        );
-        if (mounted) context.read<DatabaseService>().startSession(session);
-      }
-
-      _startSessionTimer();
-    } catch (e, stack) {
-      LoggerService().log("Session Init Error", e, stack);
+    if (widget.workoutDay != null) {
+      final session = WorkoutSession(
+        id: _sessionId,
+        planId: widget.planId ?? 'unknown',
+        dayName: widget.workoutDay!.name,
+        startTime: DateTime.now(),
+      );
+      context.read<DatabaseService>().startSession(session);
     }
   }
 
   Future<void> _loadData() async {
     final db = context.read<DatabaseService>();
     final aliases = await db.getAliases();
-    
     Map<String, double> maxes = {};
-    Map<String, String> dates = {};
-
     if (widget.workoutDay != null) {
       for (var ex in widget.workoutDay!.exercises) {
         final data = await db.getLatestOneRepMaxDetailed(ex.name);
-        if (data != null) {
-          maxes[ex.name] = data['weight'];
-          dates[ex.name] = data['date'];
-        }
+        if (data != null) maxes[ex.name] = data['weight'];
       }
     }
-
-    if (mounted) {
-      setState(() {
-        _aliases = aliases;
-        _oneRepMaxes = maxes;
-        _oneRepDates = dates;
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    _sessionTimer?.cancel();
-    _restTimer?.cancel();
-    WakelockPlus.disable().catchError((_) {});
-    super.dispose();
-  }
-
-  void _startSessionTimer() {
-    _sessionTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!_isPaused && mounted) setState(() => _sessionSeconds++);
-    });
-  }
-
-  void _triggerRest(int duration) {
-    _restTimer?.cancel();
-    setState(() {
-      _isResting = true;
-      _restSeconds = duration;
-    });
-
-    _restTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!_isPaused && mounted) {
-        setState(() {
-          if (_restSeconds > 0) {
-            _restSeconds--;
-            if (_restSeconds <= 3 && _restSeconds > 0) _playBeep();
-          } else {
-            _playBeep(long: true);
-            timer.cancel();
-            _isResting = false;
-          }
-        });
-      }
-    });
-  }
-
-  Future<void> _playBeep({bool long = false}) async {
-    try {
-      final player = AudioPlayer();
-      await player.play(AssetSource(long ? 'beep_long.mp3' : 'beep.mp3'));
-    } catch (e) {
-      // Ignore audio errors
-    }
-  }
-
-  String _formatTime(int seconds) {
-    final m = (seconds ~/ 60).toString().padLeft(2, '0');
-    final s = (seconds % 60).toString().padLeft(2, '0');
-    return "$m:$s";
+    if (mounted) setState(() { _aliases = aliases; _oneRepMaxes = maxes; });
   }
 
   void _finishWorkout() {
-    _sessionTimer?.cancel();
-    _restTimer?.cancel();
+    context.read<WorkoutPlayerService>().finishWorkout();
     context.read<DatabaseService>().endSession(_sessionId, DateTime.now());
     Navigator.pop(context);
   }
 
   @override
   Widget build(BuildContext context) {
-    final exercises = widget.workoutDay?.exercises ?? [];
+    final player = context.watch<WorkoutPlayerService>();
+    final isResting = player.state == WorkoutState.resting;
+    final isCountdown = player.state == WorkoutState.countdown;
 
     return Scaffold(
+      backgroundColor: Colors.black, // Focused dark mode for player
       appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(widget.workoutDay?.name ?? "Session", style: const TextStyle(fontSize: 16)),
-            Text(_isPaused ? "PAUSED" : _formatTime(_sessionSeconds), 
-              style: TextStyle(fontSize: 12, color: _isPaused ? Colors.orange : Colors.greenAccent)),
-          ],
-        ),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        title: Text(widget.workoutDay?.name ?? "Session"),
         actions: [
-          IconButton(
-            icon: Icon(_isPaused ? Icons.play_arrow : Icons.pause),
-            onPressed: () => setState(() => _isPaused = !_isPaused),
-          ),
-          TextButton(
-            onPressed: _finishWorkout,
-            child: const Text("FINISH", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-          ),
+          TextButton(onPressed: _finishWorkout, child: const Text("FINISH", style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold))),
         ],
       ),
-      bottomSheet: _isResting ? _buildRestOverlay() : null,
-      body: exercises.isEmpty 
-        ? const Center(child: Text("No exercises."))
-        : ListView.builder(
-            padding: const EdgeInsets.only(bottom: 120),
-            itemCount: exercises.length,
-            itemBuilder: (ctx, i) => ExerciseCard(
-              key: ValueKey("${exercises[i].name}_$i"),
-              exercise: exercises[i],
-              sessionId: _sessionId,
-              alias: _aliases[exercises[i].name], 
-              oneRepMax: _oneRepMaxes[exercises[i].name], 
-              oneRepDate: _oneRepDates[exercises[i].name], 
-              onSetCompleted: (restTime) => _triggerRest(restTime),
-            ),
+      body: Column(
+        children: [
+          // 1. SMART TIMER DISPLAY
+          _buildTimerDisplay(player),
+
+          // NEW: VERSUS LEADERBOARD
+          if (widget.versusRoomId != null) _buildVersusLeaderboard(),
+
+          // 2. CURRENT EXERCISE FOCUS
+          Expanded(
+            child: _currentStepIndex < _flatFlow.length 
+              ? _buildCurrentExerciseFocus(_flatFlow[_currentStepIndex], player)
+              : const Center(child: Text("Workout Complete!", style: TextStyle(color: Colors.white))),
           ),
+
+          // 3. NAVIGATION / SKIP
+          _buildBottomControls(player),
+        ],
+      ),
     );
   }
 
-  Widget _buildRestOverlay() {
+  Widget _buildVersusLeaderboard() {
+    final realtime = context.watch<RealtimeService>();
+    final scores = realtime.competitorTonnage;
+
     return Container(
-      width: double.infinity,
-      color: Colors.green,
-      padding: const EdgeInsets.all(16),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Colors.orange.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text("RESTING", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
-          Text(_formatTime(_restSeconds), style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.green),
-            onPressed: () => setState(() => _isResting = false),
-            child: const Text("SKIP"),
-          )
+          const Text("🏆 VERSUS MODE", style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 10)),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Text("ME: ${_sessionTotalTonnage.toInt()} lbs", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              const Spacer(),
+              if (scores.isNotEmpty) ...[
+                const Text("RIVALS: ", style: TextStyle(color: Colors.grey, fontSize: 10)),
+                ...scores.entries.map((e) => Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: Text("${e.key.split(' ').first}: ${e.value.toInt()}", style: const TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.bold, fontSize: 12)),
+                )),
+              ] else const Text("Waiting for rivals...", style: TextStyle(color: Colors.grey, fontSize: 10)),
+            ],
+          ),
+        ],
+      ),
+    }
+
+  Widget _buildTimerDisplay(WorkoutPlayerService player) {
+    Color color = Colors.blue;
+    String label = "WORKING";
+    
+    if (player.state == WorkoutState.resting) { color = Colors.green; label = "REST"; }
+    if (player.state == WorkoutState.countdown) { color = Colors.orange; label = "GET READY"; }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 24),
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        border: Border(bottom: BorderSide(color: color.withValues(alpha: 0.3))),
+      ),
+      child: Column(
+        children: [
+          Text(label, style: TextStyle(color: color, fontWeight: FontWeight.bold, letterSpacing: 2)),
+          const SizedBox(height: 8),
+          Text(
+            _formatTime(player.timerSeconds),
+            style: TextStyle(color: color, fontSize: 64, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
+          ),
         ],
       ),
     );
+  }
+
+  Widget _buildCurrentExerciseFocus(WorkoutExercise ex, WorkoutPlayerService player) {
+    // Determine set number for THIS exercise
+    int setNum = 0;
+    for (int i = 0; i <= _currentStepIndex; i++) {
+      if (_flatFlow[i] == ex) setNum++;
+    }
+
+    return Padding(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text("SET $setNum OF ${ex.sets}", style: const TextStyle(color: Colors.grey, fontSize: 16)),
+          const SizedBox(height: 8),
+          Text(
+            _aliases[ex.name] ?? ex.name,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 32),
+          
+          // INPUTS
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _buildLargeInput("LBS", ex.intensity ?? "100", _weightController),
+              const SizedBox(width: 24),
+              _buildLargeInput(ex.metricType == 'time' ? "SEC" : "REPS", ex.reps, _repsController),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLargeInput(String label, String hint, TextEditingController controller) {
+    return Column(
+      children: [
+        Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: 100,
+          child: TextField(
+            controller: controller,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+            keyboardType: TextInputType.number,
+            decoration: InputDecoration(
+              hintText: hint,
+              hintStyle: TextStyle(color: Colors.grey.withValues(alpha: 0.3)),
+              enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.grey)),
+            ),
+          ),
+        )
+      ],
+    );
+  }
+
+  Widget _buildBottomControls(WorkoutPlayerService player) {
+    final bool isWorking = player.state == WorkoutState.working;
+
+    return Padding(
+      padding: const EdgeInsets.all(32.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          if (player.state == WorkoutState.resting)
+            ElevatedButton(
+              onPressed: () => player.finishRest(),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
+              child: const Text("SKIP REST"),
+            ),
+          
+          if (isWorking)
+            SizedBox(
+              height: 80,
+              width: 200,
+              child: ElevatedButton(
+                onPressed: () {
+                  final ex = _flatFlow[_currentStepIndex];
+                  _logSet(ex);
+                  
+                  player.completeSet(ex.restSeconds);
+                  setState(() {
+                    _currentStepIndex++;
+                  });
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(40)),
+                ),
+                child: const Text("DONE", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  String _formatTime(int seconds) {
+    final m = (seconds ~/ 60).toString().padLeft(2, '0');
+    final s = (seconds % 60).toString().padLeft(2, '0');
+    return "$m:$s";
   }
 }
 

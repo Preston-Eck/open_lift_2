@@ -53,7 +53,7 @@ class DatabaseService extends ChangeNotifier {
 
         return await openDatabase(
           path,
-          version: 17,
+          version: 18,
           onCreate: (db, version) async {
             await _createTables(db);
             await _createProfileTable(db);
@@ -141,6 +141,12 @@ class DatabaseService extends ChangeNotifier {
              await db.execute("UPDATE gym_profiles SET last_updated = ?, synced = 0", [DateTime.now().toIso8601String()]);
            } catch (_) {} 
         }
+        if (oldVersion < 18) {
+           debugPrint("⚡ Migrating to v18: Social Invite...");
+           try {
+             await db.execute('ALTER TABLE gym_members ADD COLUMN invited_by TEXT');
+           } catch (_) {} 
+        }
       }
     );
   }
@@ -158,7 +164,7 @@ class DatabaseService extends ChangeNotifier {
     
     await db.execute('CREATE TABLE gym_profiles (id TEXT PRIMARY KEY, name TEXT, is_default INTEGER, created_at TEXT, owner_id TEXT, last_updated TEXT, synced INTEGER DEFAULT 0)');
     await db.execute('CREATE TABLE gym_equipment (gym_id TEXT, equipment_id TEXT, PRIMARY KEY (gym_id, equipment_id))');
-    await db.execute('CREATE TABLE gym_members (id TEXT PRIMARY KEY, gym_id TEXT, user_id TEXT, nickname TEXT, can_edit_gear INTEGER DEFAULT 0, status TEXT)');
+    await db.execute('CREATE TABLE gym_members (id TEXT PRIMARY KEY, gym_id TEXT, user_id TEXT, nickname TEXT, can_edit_gear INTEGER DEFAULT 0, status TEXT, invited_by TEXT)');
   }
 
   Future<void> _createProfileTable(Database db) async {
@@ -394,6 +400,8 @@ class DatabaseService extends ChangeNotifier {
       images: [],
     );
   }
+
+  Future<List<Map<String, dynamic>>> getAllCustomExercisesRaw() async { final db = await database; return await db.query('custom_exercises'); }
   
   // Plans
   Future<void> savePlan(WorkoutPlan plan) async {

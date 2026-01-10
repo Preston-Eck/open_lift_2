@@ -7,6 +7,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart'; 
 import 'package:sqflite_common_ffi_web/sqflite_ffi_web.dart'; // ✅ Web DB
+import 'package:firebase_core/firebase_core.dart'; // NEW
 
 import 'services/database_service.dart';
 import 'services/gemini_service.dart';
@@ -14,6 +15,9 @@ import 'services/logger_service.dart';
 import 'services/auth_service.dart';
 import 'services/sync_service.dart'; 
 import 'services/social_service.dart'; 
+import 'services/realtime_service.dart'; 
+import 'services/workout_player_service.dart'; 
+import 'services/notification_service.dart'; // NEW
 import 'theme.dart';
 import 'screens/home_screen.dart'; 
 
@@ -21,6 +25,15 @@ Future<void> main() async {
   runZonedGuarded(() async {
     debugPrint("🚀 App Starting...");
     WidgetsFlutterBinding.ensureInitialized();
+    
+    // Initialize Firebase
+    try {
+      await Firebase.initializeApp();
+      debugPrint("✅ Firebase Initialized");
+    } catch (e) {
+      debugPrint("⚠️ Firebase Init Failed (likely missing config): $e");
+    }
+
     debugPrint("✅ Widgets Binding Initialized");
     await LoggerService().init();
     debugPrint("✅ Logger Initialized");
@@ -84,6 +97,18 @@ Future<void> main() async {
           ProxyProvider<AuthService, SocialService>(
             update: (_, auth, __) => SocialService(auth),
           ),
+
+          // 4. Realtime depends on Auth
+          ChangeNotifierProxyProvider<AuthService, RealtimeService>(
+            create: (_) => RealtimeService(Provider.of<AuthService>(_, listen: false)),
+            update: (_, auth, realtime) => RealtimeService(auth),
+          ),
+
+          // 5. Workout Player (Global State)
+          ChangeNotifierProvider(create: (_) => WorkoutPlayerService()),
+
+          // 6. Notifications
+          Provider(create: (_) => NotificationService()),
         ],
         child: const MyApp(),
       ),
@@ -101,6 +126,26 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
+  @override
+  void initState() {
+    super.initState();
+    _initNotifications();
+  }
+
+  Future<void> _initNotifications() async {
+    // Wait for frame to ensure providers are available
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final notifs = context.read<NotificationService>();
+      final auth = context.read<AuthService>();
+      
+      await notifs.init();
+      final token = await notifs.getToken();
+      if (token != null) {
+        await auth.updateFcmToken(token);
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(

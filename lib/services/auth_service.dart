@@ -68,4 +68,14 @@ class AuthService extends ChangeNotifier {
     _profile = null;
     notifyListeners();
   }
+
+  Future<void> updateFcmToken(String token) async {
+    if (_user == null) return;
+    try {
+      await _supabase.from('profiles').update({'fcm_token': token}).eq('id', _user!.id);
+      debugPrint("FCM Token Updated in Supabase");
+    } catch (e) {
+      debugPrint("Error updating FCM token: $e");
+    }
+  }
 }

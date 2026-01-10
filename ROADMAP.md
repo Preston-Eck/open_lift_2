@@ -1,71 +1,84 @@
-# OpenLift Roadmap & Handoff Strategy
+# OpenLift 2 - Development Roadmap
 
-## 🚀 Current Status (v1.1.0)
-The application is robust, supporting:
-*   **AI Plan Generation** with self-healing library (auto-defines new exercises).
-*   **Data Sovereignty** via JSON Export/Import.
-*   **Community Features** via Gym ID Sharing and JSON Plan Sharing.
-*   **Health Sync** (Android/iOS) for weight data.
-*   **Visual Analytics** with a low-poly muscle heatmap.
+**Core Philosophy:** "Free to Maintain" (F2M).
+**Architecture:** Flutter (Client) + Supabase (Backend/Realtime) + Firebase Cloud Messaging (Transport).
+**AI Model:** Gemini 2.0 Flash (Free Tier).
 
 ---
 
-## 📅 Roadmap: v1.2 (The "Connected" Update)
-**Focus:** Removing friction in sharing and usage.
-
-### 1. Deep Linking (High Priority)
-*   **Goal:** Allow users to click `openlift://share/plan?id=123` to instantly import a plan.
-*   **Tech:** `app_links` or `uni_links` package.
-*   **Implementation:** Handle incoming URL, parse query params, fetch JSON from Supabase (requires uploading plans to public bucket or table first), and trigger the "Import" logic.
-
-### 2. The "Plate Calculator" Utility
-*   **Goal:** Visual aid for loading the bar.
-*   **UI:** A popup where user enters "Target Weight" (e.g., 315 lbs) and "Bar Weight" (45 lbs).
-*   **Output:** Visual stack of plates (e.g., [45][45][45] | [45][45][45]).
-
-### 3. Social Leaderboards
-*   **Goal:** Simple "Weekly Volume" leaderboard for users in the same "Gym".
-*   **Tech:** Supabase Realtime or standard RPC.
-*   **Logic:** `SELECT sum(volume) FROM logs WHERE gym_id = X GROUP BY user_id`.
+## v1.0.3: The Hotfix (Immediate Priority)
+**Goal:** Fix data loss issues where Custom Equipment and Exercises do not sync between devices.
+* **Scope:**
+    * [ ] Update `SyncService` to handle `user_equipment` table.
+    * [ ] Update `SyncService` to handle `custom_exercises` table.
+    * [ ] Verify `last_updated` timestamps are correctly managing conflict resolution (Last-Write-Wins).
+* **Key Files:** `lib/services/sync_service.dart`.
 
 ---
 
-## 🔮 Roadmap: v2.0 (The "Hardware" Update)
-**Focus:** Integration with the physical world.
-
-### 1. Wearable Integration (BLE)
-*   **Goal:** Real-time Heart Rate during workout player.
-*   **Tech:** `flutter_blue_plus`.
-*   **Logic:** Scan for HRM services, display BPM on the player screen.
-
-### 2. Advanced AI Coaching
-*   **Goal:** "Predictive Loading".
-*   **Logic:** AI analyzes previous session's RPE (Rate of Perceived Exertion) and suggests the exact weight for the next set *during* the workout.
-
----
-
-## 📱 Deployment Instructions
-
-### Web
-*   **Artifact:** `build/web`
-*   **Action:** Deploy this folder to Firebase Hosting, Vercel, or GitHub Pages.
-*   **Command:** `firebase deploy` (if initialized).
-
-### Android
-*   **Artifact:** `build/app/outputs/flutter-apk/app-release.apk`
-*   **Action:** Upload to Google Play Console (requires signing with a release keystore, currently signed with debug key for testing).
-
-### iOS (Requires Mac)
-*   **Prerequisites:** Xcode, Apple Developer Account.
-*   **Action:**
-    1.  Transfer repo to a Mac.
-    2.  Run `flutter build ios`.
-    3.  Open `ios/Runner.xcworkspace` in Xcode.
-    4.  Configure Signing & Capabilities.
-    5.  Archive & Upload to TestFlight.
+## v1.1.0: The Social Structure (The "Inbox" Update)
+**Goal:** Eliminate "Share Codes". Enable direct Gym/Plan sharing via a Friend Graph and an In-App Inbox.
+* **Schema Changes:**
+    * `notifications`: `id`, `user_id`, `type` (invite/nudge/share), `payload_json`, `is_read`, `created_at`.
+    * `gym_members`: Add `status` (pending/active) and `invited_by`.
+    * `workout_comments`: `id`, `session_id`, `user_id`, `text`, `created_at`.
+    * `workout_likes`: `id`, `session_id`, `user_id`.
+* **Features:**
+    * [ ] **The Inbox:** A new screen tab for accepting Friend Requests, Gym Invites, and Plan Shares.
+    * [ ] **Direct Sharing:** "Send to Friend" button for Plans and Gyms (writes to `notifications`).
+    * [ ] **Activity Feed:** Convert `SocialDashboard` to show Friends' latest `workout_logs` with Like/Comment buttons.
+* **Key Files:** `social_service.dart`, `inbox_screen.dart`, `social_dashboard_screen.dart`.
 
 ---
 
-## 🛠 Maintenance
-*   **Supabase:** Ensure RLS policies allow the new `gym_members` inserts.
-*   **Gemini:** Monitor quota usage. The new prompt is larger (two-part JSON).
+## v1.2.0: The Vision Update (Automated Onboarding)
+**Goal:** Reduce friction in setting up a gym using Multi-Modal AI.
+* **New Packages:** `image_picker`, `flutter_image_compress`, `file_picker`, `syncfusion_flutter_pdf` (or similar).
+* **Features:**
+    * [ ] **Equipment Input UI:** Form accepting Name, Description, Photo, and PDF Manual.
+    * [ ] **Gemini Vision Service:** Update `GeminiService` to send `Content.multi` (Text + Image/PDF bytes).
+    * [ ] **Parser:** Convert AI JSON response into `custom_exercises` linked to the new equipment.
+* **Risk:** Payload size limits on Gemini API. Need robust image compression.
+
+---
+
+## v1.2.5: The Flow Update (Smart Player)
+**Goal:** Transform the app from a "Logger" to a "Coach".
+* **Schema Changes:**
+    * `exercises`: Add `metric_type` ('weight_reps', 'time', 'amrap').
+    * `workout_plans`: Add `circuit_group_id` (for supersets).
+* **Features:**
+    * [ ] **Smart Timers:** 3s Countdown (Pre-set), Duration Timer (During-set), Auto-Rest (Post-set).
+    * [ ] **Audio Ducking:** Lower background music volume during beeps/TTS.
+    * [ ] **Auto-Play:** State machine that automatically advances to the next step.
+    * [ ] **Circuit Logic:** Interleave sets (A1 -> B1 -> A2 -> B2).
+* **Key Files:** `workout_player_service.dart`, `workout_player_screen.dart`.
+
+---
+
+## v1.3.0: The Visual Update
+**Goal:** Visual motivation.
+* **New Packages:** `flutter_svg`.
+* **Features:**
+    * [ ] **Muscle Heat Map:** Render a human body SVG. Map `primary_muscles` strings to SVG paths.
+    * [ ] **Analytics:** Color code muscles by Volume (Red = High, Blue = Low) over the last 30 days.
+
+---
+
+## v1.4.0: The Connectivity Update
+**Goal:** Real-time competition and accountability notifications.
+* **New Packages:** `firebase_messaging` (FCM), `flutter_local_notifications`.
+* **Infrastructure:**
+    * **Supabase Edge Functions (Free Tier):**
+        * `check_missed_workouts`: Runs nightly. If user missed schedule -> Sends FCM to Friends.
+* **Features:**
+    * [ ] **Versus Mode:** Live "Tonnage" counter using Supabase Realtime Broadcast channels.
+    * [ ] **Push Notifications:** Deep linking for Nudges and Invites.
+
+---
+
+## v1.5.0: The Intelligence Update
+**Goal:** Conversational AI Coach.
+* **Features:**
+    * [ ] **Chat Interface:** RAG (Retrieval-Augmented Generation) on user's `workout_logs`.
+    * [ ] **Querying:** "Why is my bench press stalled?" -> AI analyzes volume/intensity trends.

@@ -98,7 +98,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             ],
           ),
           const SizedBox(height: 8),
-          const Text("Visualizes which muscles you've trained most over the last 90 days."),
+          const Text("Visualizes which muscles you've trained most over the last 30 days."),
           const SizedBox(height: 24),
           
           MuscleHeatmap(muscleIntensities: _heatmapData),

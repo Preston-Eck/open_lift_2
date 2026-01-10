@@ -179,6 +179,56 @@ class GeminiService {
     }
   }
 
+  /// NEW: Vision-based analysis for Equipment + Exercise parsing
+  Future<Map<String, dynamic>> analyzeEquipmentVision({
+    required String itemName,
+    String? userNotes,
+    List<DataPart>? mediaParts, // Images or PDFs
+  }) async {
+    final prompt = '''
+      You are an expert fitness equipment auditor. 
+      Analyze the equipment: "$itemName".
+      User Notes: "${userNotes ?? 'None'}"
+
+      Your Task:
+      1. Identify the core capabilities (e.g., Cable, Smith Machine, Bench).
+      2. Extract OR infer a list of 10-15 standard exercises that can be performed on this specific item.
+      
+      Return a JSON object:
+      {
+        "capabilities": ["Cable", "Leg Developer", ...],
+        "exercises": [
+          {
+            "name": "Leg Extension",
+            "category": "Legs",
+            "primary_muscles": ["Quads"],
+            "instructions": ["Sit on bench", "Extend legs", "Squeeze quads"]
+          }
+        ]
+      }
+      
+      Return ONLY valid JSON.
+    ''';
+
+    try {
+      final content = [
+        Content.multi([
+          TextPart(prompt),
+          if (mediaParts != null) ...mediaParts,
+        ])
+      ];
+
+      final response = await _model.generateContent(content);
+      final String rawJson = response.text ?? "{}";
+      final cleanJson = rawJson.replaceAll('```json', '').replaceAll('```', '').trim();
+      
+      return jsonDecode(cleanJson);
+    } catch (e) {
+      debugPrint("Gemini Vision Analysis Error: $e");
+      return {"capabilities": [], "exercises": []};
+    }
+  }
+
   /// Suggests exercises for a specific piece of equipment (Tag)
   /// excluding ones the user already has.
   Future<List<Map<String, dynamic>>> suggestMissingExercises(
@@ -233,6 +283,7 @@ class GeminiService {
     final equipment = contextData['equipment'] ?? "Unknown";
     final recentLogs = contextData['recent_logs'] ?? "No recent activity";
     final strengthStats = contextData['strength_stats'] ?? "No data";
+    final specificHistory = contextData['specific_history'] ?? ""; // NEW
 
     final systemPrompt = '''
       You are "OpenLift Coach", an expert personal trainer and strength coach.
@@ -241,16 +292,18 @@ class GeminiService {
       PROFILE: $profile
       AVAILABLE EQUIPMENT: $equipment
       ESTIMATED 1RMs: $strengthStats
-      RECENT WORKOUTS (Last 5): $recentLogs
+      RECENT WORKOUTS (Global): $recentLogs
+      
+      ${specificHistory.isNotEmpty ? "=== SPECIFIC EXERCISE HISTORY ===\n$specificHistory" : ""}
       
       === YOUR MISSION ===
       1. Answer questions about fitness, form, programming, and nutrition.
-      2. Use the user's specific context (e.g., if they ask for a leg exercise, check their equipment first).
-      3. Be encouraging but direct. Focus on progressive overload and consistency.
-      4. If asked about their progress, reference their Recent Workouts or 1RMs.
+      2. Use the user's specific context.
+      3. If specific history is provided, analyze the trend (Volume, Intensity, Frequency) to answer questions like "Why am I stalled?".
+      4. Be encouraging but direct. 
       
       === STYLE ===
-      Concise, actionable, professional yet friendly. Avoid long preambles.
+      Concise, actionable, professional yet friendly.
     ''';
 
     try {

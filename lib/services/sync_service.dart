@@ -209,10 +209,37 @@ class SyncService {
         .eq('user_id', userId)
         .gt('updated_at', lastSyncTime);
 
-    if (response.isNotEmpty) {
-      final List<Map<String, dynamic>> localBatch = [];
-      for (var row in response) {
-        localBatch.add({
+    if (response.isEmpty) return;
+
+    // LWW: Fetch local state to compare
+    final localRows = await _db.getUserEquipmentList();
+    final localMap = {for (var item in localRows) item['id']: item};
+    
+    final List<Map<String, dynamic>> upsertBatch = [];
+    
+    for (var row in response) {
+      final id = row['id'];
+      final remoteTime = DateTime.tryParse(row['updated_at'] ?? '') ?? DateTime(1970);
+      final local = localMap[id];
+      
+      bool shouldUpdate = false;
+      if (local == null) {
+        shouldUpdate = true; // New item from remote
+      } else {
+        // Protect local unsynced changes
+        final synced = local['synced'] == 1;
+        if (synced) {
+          // If local is synced, we can overwrite if remote is newer
+          final localTime = DateTime.tryParse(local['last_updated'] ?? '') ?? DateTime(1970);
+          if (remoteTime.isAfter(localTime)) {
+             shouldUpdate = true;
+          }
+        }
+        // If !synced, we keep local (Conflict: Local change vs Remote change. We keep local draft.)
+      }
+      
+      if (shouldUpdate) {
+        upsertBatch.add({
           'id': row['id'], 
           'name': row['name'],
           'is_owned': row['is_owned'],
@@ -220,7 +247,10 @@ class SyncService {
           'last_updated': row['updated_at'],
         });
       }
-      await _db.bulkUpsertEquipment(localBatch);
+    }
+
+    if (upsertBatch.isNotEmpty) {
+      await _db.bulkUpsertEquipment(upsertBatch);
     }
   }
 
@@ -257,13 +287,37 @@ class SyncService {
         .eq('user_id', userId)
         .gt('updated_at', lastSyncTime);
 
-    if (response.isNotEmpty) {
-      final List<Map<String, dynamic>> localBatch = [];
-      for (var row in response) {
+    if (response.isEmpty) return;
+
+    // LWW: Fetch local state
+    final localRows = await _db.getAllCustomExercisesRaw();
+    final localMap = {for (var item in localRows) item['id']: item};
+
+    final List<Map<String, dynamic>> upsertBatch = [];
+
+    for (var row in response) {
+      final id = row['id'];
+      final remoteTime = DateTime.tryParse(row['updated_at'] ?? '') ?? DateTime(1970);
+      final local = localMap[id];
+      
+      bool shouldUpdate = false;
+      if (local == null) {
+        shouldUpdate = true;
+      } else {
+        final synced = local['synced'] == 1;
+        if (synced) {
+          final localTime = DateTime.tryParse(local['last_updated'] ?? '') ?? DateTime(1970);
+          if (remoteTime.isAfter(localTime)) {
+             shouldUpdate = true;
+          }
+        }
+      }
+      
+      if (shouldUpdate) {
         final muscles = (row['primary_muscles'] as List<dynamic>?)?.join(',') ?? '';
         final equipJson = Helpers.safeJsonEncode(row['equipment_required']);
         
-        localBatch.add({
+        upsertBatch.add({
           'id': row['id'],
           'name': row['name'],
           'category': row['category'],
@@ -273,7 +327,10 @@ class SyncService {
           'last_updated': row['updated_at'],
         });
       }
-      await _db.bulkUpsertCustomExercises(localBatch);
+    }
+
+    if (upsertBatch.isNotEmpty) {
+      await _db.bulkUpsertCustomExercises(upsertBatch);
     }
   }
 

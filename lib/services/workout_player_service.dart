@@ -1,24 +1,65 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:audioplayers/audioplayers.dart';
 
-enum WorkoutState { warmup, working, resting, finished }
+enum WorkoutState { idle, countdown, working, resting, finished }
 
 class WorkoutPlayerService extends ChangeNotifier {
-  WorkoutState _state = WorkoutState.warmup;
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  
+  WorkoutState _state = WorkoutState.idle;
   int _timerSeconds = 0;
   Timer? _timer;
-
+  
+  // Progress tracking
+  int _currentExerciseIndex = 0;
+  int _currentSetIndex = 0;
+  
   WorkoutState get state => _state;
   int get timerSeconds => _timerSeconds;
+  int get currentExerciseIndex => _currentExerciseIndex;
+  int get currentSetIndex => _currentSetIndex;
 
   void startWorkout() {
-    _state = WorkoutState.working;
+    _currentExerciseIndex = 0;
+    _currentSetIndex = 1;
+    _startCountdown();
     WakelockPlus.enable();
+  }
+
+  void _startCountdown() {
+    _state = WorkoutState.countdown;
+    _timerSeconds = 3;
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_timerSeconds > 0) {
+        _playBeep();
+        _timerSeconds--;
+      } else {
+        _startWork();
+      }
+      notifyListeners();
+    });
+    notifyListeners();
+  }
+
+  void _startWork() {
+    _state = WorkoutState.working;
+    _timer?.cancel();
+    _playBeep(long: true);
+    
+    // Duration timer for 'time' based exercises
+    _timerSeconds = 0;
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      _timerSeconds++;
+      notifyListeners();
+    });
     notifyListeners();
   }
 
   void completeSet(int restTimeSeconds) {
+    _timer?.cancel();
     _state = WorkoutState.resting;
     _startRestTimer(restTimeSeconds);
     notifyListeners();
@@ -29,22 +70,25 @@ class WorkoutPlayerService extends ChangeNotifier {
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_timerSeconds > 0) {
+        if (_timerSeconds <= 3) _playBeep();
         _timerSeconds--;
-        if (_timerSeconds <= 3 && _timerSeconds > 0) {
-          _playBeep();
-        }
       } else {
-        finishRest();
+        _finishRest();
       }
       notifyListeners();
     });
   }
 
-  void finishRest() {
+  void _finishRest() {
     _timer?.cancel();
-    _state = WorkoutState.working;
-    _playBeep(long: true);
-    notifyListeners();
+    _currentSetIndex++;
+    _startCountdown();
+  }
+
+  void nextExercise() {
+    _currentExerciseIndex++;
+    _currentSetIndex = 1;
+    _startCountdown();
   }
 
   void finishWorkout() {
@@ -55,8 +99,17 @@ class WorkoutPlayerService extends ChangeNotifier {
   }
 
   Future<void> _playBeep({bool long = false}) async {
-    // Ensure you add beep.mp3 to assets
-    // await _audioPlayer.play(AssetSource(long ? 'beep_long.mp3' : 'beep.mp3'));
-    debugPrint("BEEP!"); 
+    try {
+      await _audioPlayer.play(AssetSource(long ? 'beep_long.mp3' : 'beep.mp3'), volume: 1.0);
+    } catch (e) {
+      debugPrint("Audio Error: $e");
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _audioPlayer.dispose();
+    super.dispose();
   }
 }

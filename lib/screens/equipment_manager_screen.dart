@@ -2,15 +2,23 @@ import 'package:flutter/services.dart'; // For Clipboard
 
 // ... imports below
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:google_generative_ai/google_generative_ai.dart';
 import '../services/database_service.dart';
 import '../services/sync_service.dart'; // For Auto-Sync
+import '../services/gemini_service.dart'; // NEW
 import '../config/equipment_bundles.dart';
 import '../theme.dart';
 import '../widgets/exercise_selection_dialog.dart';
+import '../models/exercise.dart'; // NEW
 
 class EquipmentManagerScreen extends StatefulWidget {
+// ... (rest of EquipmentManagerScreen remains the same)
   const EquipmentManagerScreen({super.key});
 
   @override
@@ -349,6 +357,11 @@ class _ComplexEquipmentEditorState extends State<ComplexEquipmentEditor> {
   final _nameController = TextEditingController();
   final Set<String> _selectedCapabilities = {};
   final List<String> _specificExercises = []; 
+  bool _isAnalyzing = false;
+
+  // Vision State
+  File? _selectedFile;
+  String? _mimeType;
 
   @override
   void initState() {
@@ -369,9 +382,104 @@ class _ComplexEquipmentEditorState extends State<ComplexEquipmentEditor> {
     }
   }
 
+  Future<void> _pickImage(ImageSource source) async {
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: source);
+    if (pickedFile != null) {
+      // Compress Image
+      final targetPath = "${pickedFile.path}_compressed.jpg";
+      final result = await FlutterImageCompress.compressAndGetFile(
+        pickedFile.path,
+        targetPath,
+        quality: 50, // High compression for AI analysis
+      );
+
+      if (result != null) {
+        setState(() {
+          _selectedFile = File(result.path);
+          _mimeType = 'image/jpeg';
+        });
+      }
+    }
+  }
+
+  Future<void> _pickPDF() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['pdf'],
+    );
+    if (result != null && result.files.single.path != null) {
+      setState(() {
+        _selectedFile = File(result.files.single.path!);
+        _mimeType = 'application/pdf';
+      });
+    }
+  }
+
+  Future<void> _runAIAnalysis() async {
+    if (_nameController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Please enter equipment name first")));
+      return;
+    }
+
+    setState(() => _isAnalyzing = true);
+    
+    try {
+      final gemini = context.read<GeminiService>();
+      List<DataPart>? mediaParts;
+      
+      if (_selectedFile != null && _mimeType != null) {
+        final bytes = await _selectedFile!.readAsBytes();
+        mediaParts = [DataPart(_mimeType!, bytes)];
+      }
+
+      final result = await gemini.analyzeEquipmentVision(
+        itemName: _nameController.text,
+        mediaParts: mediaParts,
+      );
+
+      // Parse Result
+      final List<dynamic> caps = result['capabilities'] ?? [];
+      final List<dynamic> exes = result['exercises'] ?? [];
+
+      setState(() {
+        for (var c in caps) {
+          if (allGenericEquipment.contains(c)) _selectedCapabilities.add(c.toString());
+        }
+        
+        // Convert suggested exercises to local Exercises and save them
+        _specificExercises.addAll(exes.map((e) => e['name'].toString()));
+      });
+
+      // Auto-save new exercises to DB
+      final db = context.read<DatabaseService>();
+      for (var e in exes) {
+         final newEx = Exercise(
+           id: const Uuid().v4(),
+           name: e['name'],
+           category: e['category'],
+           primaryMuscles: List<String>.from(e['primary_muscles'] ?? []),
+           secondaryMuscles: [],
+           equipment: [_nameController.text],
+           instructions: List<String>.from(e['instructions'] ?? []),
+           images: [],
+         );
+         await db.addCustomExercise(newEx);
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("AI Found ${exes.length} exercises!")));
+      }
+
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("AI Error: $e")));
+    } finally {
+      if (mounted) setState(() => _isAnalyzing = false);
+    }
+  }
+
   Future<void> _save() async {
     if (_nameController.text.isEmpty) return;
-
     final db = context.read<DatabaseService>();
     final sync = context.read<SyncService>();
     
@@ -381,26 +489,11 @@ class _ComplexEquipmentEditorState extends State<ComplexEquipmentEditor> {
       _nameController.text 
     }.toList();
 
-    // 1. Update Global Definition
-    // (Note: We use updateEquipmentCapabilities which manages the 'user_equipment' table)
     await db.updateEquipmentCapabilities(_nameController.text, finalCapabilities);
     
-    // 2. If it's a NEW item (or not passed in), auto-enable it for the current gym
-    // (Assumes updateEquipmentCapabilities creates it if missing, which it does)
     if (widget.item == null) {
       final gymId = db.currentGymId;
-      if (gymId != null) {
-        // Need to find the ID. Since updateEquipmentCapabilities uses name as ID for standard or existing logic,
-        // we need to be careful.
-        // Actually, user_equipment IDs are typically names for standard, but UUIDs for custom?
-        // Your existing DatabaseService.updateEquipmentCapabilities uses:
-        // where: 'id = ?', whereArgs: [name]
-        // This implies for Custom items you are using the Name as the ID? 
-        // If so, we can use the name. If not, we need the UUID.
-        // Looking at DatabaseService: updateEquipment inserts with 'id': name.
-        // So ID = Name currently.
-        await db.toggleGymEquipment(gymId, _nameController.text, true);
-      }
+      if (gymId != null) await db.toggleGymEquipment(gymId, _nameController.text, true);
     }
     
     sync.syncAll();
@@ -408,7 +501,6 @@ class _ComplexEquipmentEditorState extends State<ComplexEquipmentEditor> {
   }
 
   Future<void> _delete() async {
-    // Soft delete or remove? Currently just disables ownership globally.
     if (widget.item != null) {
       await context.read<DatabaseService>().updateEquipment(widget.item!['name'], false);
       if (mounted) context.read<SyncService>().syncAll();
@@ -421,11 +513,8 @@ class _ComplexEquipmentEditorState extends State<ComplexEquipmentEditor> {
       context: context,
       builder: (ctx) => const ExerciseSelectionDialog(),
     );
-
     if (selectedName != null && selectedName.isNotEmpty) {
-      setState(() {
-        _specificExercises.add(selectedName);
-      });
+      setState(() => _specificExercises.add(selectedName));
     }
   }
 
@@ -452,11 +541,59 @@ class _ComplexEquipmentEditorState extends State<ComplexEquipmentEditor> {
                 hintText: "e.g. Major Lutie Power Cage",
                 border: OutlineInputBorder()
               ),
-              // Disable editing ID (Name) for existing items to prevent breaking links
               enabled: widget.item == null, 
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 20),
 
+            // --- VISION SECTION ---
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppTheme.renewalTeal.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppTheme.renewalTeal.withValues(alpha: 0.2)),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.auto_awesome, color: AppTheme.renewalTeal),
+                      const SizedBox(width: 8),
+                      const Text("AI Automated Setup", style: TextStyle(fontWeight: FontWeight.bold)),
+                      const Spacer(),
+                      if (_isAnalyzing) const CircularProgressIndicator(strokeWidth: 2),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  const Text("Upload a photo or PDF manual to automatically identify capabilities and exercises.", style: TextStyle(fontSize: 12)),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      _MediaButton(icon: Icons.camera_alt, label: "Photo", onTap: () => _pickImage(ImageSource.camera)),
+                      _MediaButton(icon: Icons.photo_library, label: "Gallery", onTap: () => _pickImage(ImageSource.gallery)),
+                      _MediaButton(icon: Icons.picture_as_pdf, label: "PDF", onTap: _pickPDF),
+                    ],
+                  ),
+                  if (_selectedFile != null) ...[
+                    const SizedBox(height: 12),
+                    Text("Selected: ${_selectedFile!.path.split('/').last}", style: const TextStyle(fontSize: 11, color: Colors.blue)),
+                  ],
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.analytics),
+                      label: const Text("ANALYZE WITH AI"),
+                      style: ElevatedButton.styleFrom(backgroundColor: AppTheme.renewalTeal, foregroundColor: Colors.white),
+                      onPressed: _isAnalyzing ? null : _runAIAnalysis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 24),
             const Text("What functions does this provide?", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             const SizedBox(height: 10),
             Wrap(
@@ -469,58 +606,52 @@ class _ComplexEquipmentEditorState extends State<ComplexEquipmentEditor> {
                   selected: isSelected,
                   onSelected: (val) {
                     setState(() {
-                      if (val) {
-                        _selectedCapabilities.add(tag);
-                      } else {
-                        _selectedCapabilities.remove(tag);
-                      }
+                      if (val) _selectedCapabilities.add(tag);
+                      else _selectedCapabilities.remove(tag);
                     });
                   },
                 );
               }).toList(),
             ),
-            // ... (Rest of UI same as before) ...
-             const SizedBox(height: 30),
 
+            const SizedBox(height: 30),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text("Specific Exercises", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                TextButton.icon(
-                  onPressed: _addSpecificExercise, 
-                  icon: const Icon(Icons.add), 
-                  label: const Text("Add")
-                ),
+                const Text("Linked Exercises", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                TextButton.icon(onPressed: _addSpecificExercise, icon: const Icon(Icons.add), label: const Text("Add")),
               ],
             ),
-            const Text("Add exercises you know can be performed on this machine.", style: TextStyle(color: Colors.grey, fontSize: 12)),
-            const SizedBox(height: 10),
-            
             if (_specificExercises.isEmpty)
-              Container(
-                padding: const EdgeInsets.all(16),
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
-                  borderRadius: BorderRadius.circular(8)
-                ),
-                child: const Text("No specific exercises linked.", style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic)),
-              )
+              const Text("No exercises linked.", style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic))
             else
               ..._specificExercises.map((exName) => Card(
-                margin: const EdgeInsets.only(bottom: 8),
                 child: ListTile(
                   dense: true,
                   title: Text(exName),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.close, size: 16),
-                    onPressed: () => setState(() => _specificExercises.remove(exName)),
-                  ),
+                  trailing: IconButton(icon: const Icon(Icons.close, size: 16), onPressed: () => setState(() => _specificExercises.remove(exName))),
                 ),
               )),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _MediaButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  const _MediaButton({required this.icon, required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        IconButton.filledTonal(onPressed: onTap, icon: Icon(icon), color: AppTheme.renewalTeal),
+        Text(label, style: const TextStyle(fontSize: 10)),
+      ],
     );
   }
 }
