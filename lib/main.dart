@@ -4,12 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart'; // ✅ NEW: For kIsWeb
 import 'package:provider/provider.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'dart:async';
-import 'dart:io'; 
-import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
-import 'package:provider/provider.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart'; 
 import 'package:sqflite_common_ffi_web/sqflite_ffi_web.dart'; // ✅ Web DB
@@ -25,26 +19,26 @@ import 'screens/home_screen.dart';
 
 Future<void> main() async {
   runZonedGuarded(() async {
-    print("🚀 App Starting...");
+    debugPrint("🚀 App Starting...");
     WidgetsFlutterBinding.ensureInitialized();
-    print("✅ Widgets Binding Initialized");
+    debugPrint("✅ Widgets Binding Initialized");
     await LoggerService().init();
-    print("✅ Logger Initialized");
+    debugPrint("✅ Logger Initialized");
 
     if (kIsWeb) {
-      print("🌐 Initializing Web Database...");
+      debugPrint("🌐 Initializing Web Database...");
       // Using the more explicit web initialization
       databaseFactory = databaseFactoryFfiWeb;
     } else if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-      print("📦 Initializing FFI Database...");
+      debugPrint("📦 Initializing FFI Database...");
       sqfliteFfiInit();
       databaseFactory = databaseFactoryFfi;
     }
 
     try {
-      print("📄 Loading app.env...");
+      debugPrint("📄 Loading app.env...");
       await dotenv.load(fileName: "app.env");
-      print("✅ app.env Loaded");
+      debugPrint("✅ app.env Loaded");
       
       final url = dotenv.env['SUPABASE_URL'];
       final key = dotenv.env['SUPABASE_ANON_KEY'];
@@ -53,18 +47,18 @@ Future<void> main() async {
         throw Exception("Missing Supabase URL or Anon Key in app.env");
       }
 
-      print("🔗 Initializing Supabase...");
+      debugPrint("🔗 Initializing Supabase...");
       await Supabase.initialize(
         url: url,
         anonKey: key,
       );
-      print("✅ Supabase Initialized");
+      debugPrint("✅ Supabase Initialized");
     } catch (e, stack) {
-      print("❌ Initialization Error: $e");
+      debugPrint("❌ Initialization Error: $e");
       LoggerService().log("Startup Error", e, stack);
     }
 
-    print("🏃 Running App...");
+    debugPrint("🏃 Running App...");
     runApp(
       MultiProvider(
         providers: [

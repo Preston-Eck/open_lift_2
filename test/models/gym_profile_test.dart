@@ -4,7 +4,7 @@ import 'package:open_lift_2/models/gym_profile.dart';
 void main() {
   group('GymProfile', () {
     test('Correctly identifies owner vs shared', () {
-      final ownerId = 'user_123';
+      const ownerId = 'user_123';
       final gymMap = {
         'id': 'gym_abc',
         'name': 'My Gym',
@@ -18,7 +18,7 @@ void main() {
       expect(profileOwner.canEdit, true);
 
       // Case 2: I am a visitor (Shared)
-      final visitorId = 'user_456';
+      const visitorId = 'user_456';
       final profileVisitor = GymProfile.fromMap(gymMap, currentUserId: visitorId);
       expect(profileVisitor.isShared, true);
       // By default visitors can't edit unless specified in join query (which isn't in this map)
@@ -27,8 +27,8 @@ void main() {
     });
 
     test('Shared profile respects can_edit_gear permission', () {
-      final ownerId = 'user_123';
-      final visitorId = 'user_456';
+      const ownerId = 'user_123';
+      const visitorId = 'user_456';
       
       final gymMap = {
         'id': 'gym_abc',
