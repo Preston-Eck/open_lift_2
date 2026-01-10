@@ -9,9 +9,9 @@
 ## v1.0.3: The Hotfix (Immediate Priority)
 **Goal:** Fix data loss issues where Custom Equipment and Exercises do not sync between devices.
 * **Scope:**
-    * [ ] Update `SyncService` to handle `user_equipment` table.
-    * [ ] Update `SyncService` to handle `custom_exercises` table.
-    * [ ] Verify `last_updated` timestamps are correctly managing conflict resolution (Last-Write-Wins).
+    * [x] Update `SyncService` to handle `user_equipment` table.
+    * [x] Update `SyncService` to handle `custom_exercises` table.
+    * [x] Verify `last_updated` timestamps are correctly managing conflict resolution (Last-Write-Wins).
 * **Key Files:** `lib/services/sync_service.dart`.
 
 ---
@@ -24,9 +24,9 @@
     * `workout_comments`: `id`, `session_id`, `user_id`, `text`, `created_at`.
     * `workout_likes`: `id`, `session_id`, `user_id`.
 * **Features:**
-    * [ ] **The Inbox:** A new screen tab for accepting Friend Requests, Gym Invites, and Plan Shares.
-    * [ ] **Direct Sharing:** "Send to Friend" button for Plans and Gyms (writes to `notifications`).
-    * [ ] **Activity Feed:** Convert `SocialDashboard` to show Friends' latest `workout_logs` with Like/Comment buttons.
+    * [x] **The Inbox:** A new screen tab for accepting Friend Requests, Gym Invites, and Plan Shares.
+    * [x] **Direct Sharing:** "Send to Friend" button for Plans and Gyms (writes to `notifications`).
+    * [x] **Activity Feed:** Convert `SocialDashboard` to show Friends' latest `workout_logs` with Like/Comment buttons.
 * **Key Files:** `social_service.dart`, `inbox_screen.dart`, `social_dashboard_screen.dart`.
 
 ---
@@ -35,9 +35,9 @@
 **Goal:** Reduce friction in setting up a gym using Multi-Modal AI.
 * **New Packages:** `image_picker`, `flutter_image_compress`, `file_picker`, `syncfusion_flutter_pdf` (or similar).
 * **Features:**
-    * [ ] **Equipment Input UI:** Form accepting Name, Description, Photo, and PDF Manual.
-    * [ ] **Gemini Vision Service:** Update `GeminiService` to send `Content.multi` (Text + Image/PDF bytes).
-    * [ ] **Parser:** Convert AI JSON response into `custom_exercises` linked to the new equipment.
+    * [x] **Equipment Input UI:** Form accepting Name, Description, Photo, and PDF Manual.
+    * [x] **Gemini Vision Service:** Update `GeminiService` to send `Content.multi` (Text + Image/PDF bytes).
+    * [x] **Parser:** Convert AI JSON response into `custom_exercises` linked to the new equipment.
 * **Risk:** Payload size limits on Gemini API. Need robust image compression.
 
 ---
@@ -48,10 +48,10 @@
     * `exercises`: Add `metric_type` ('weight_reps', 'time', 'amrap').
     * `workout_plans`: Add `circuit_group_id` (for supersets).
 * **Features:**
-    * [ ] **Smart Timers:** 3s Countdown (Pre-set), Duration Timer (During-set), Auto-Rest (Post-set).
-    * [ ] **Audio Ducking:** Lower background music volume during beeps/TTS.
-    * [ ] **Auto-Play:** State machine that automatically advances to the next step.
-    * [ ] **Circuit Logic:** Interleave sets (A1 -> B1 -> A2 -> B2).
+    * [x] **Smart Timers:** 3s Countdown (Pre-set), Duration Timer (During-set), Auto-Rest (Post-set).
+    * [x] **Audio Ducking:** Lower background music volume during beeps/TTS.
+    * [x] **Auto-Play:** State machine that automatically advances to the next step.
+    * [x] **Circuit Logic:** Interleave sets (A1 -> B1 -> A2 -> B2).
 * **Key Files:** `workout_player_service.dart`, `workout_player_screen.dart`.
 
 ---
@@ -60,8 +60,8 @@
 **Goal:** Visual motivation.
 * **New Packages:** `flutter_svg`.
 * **Features:**
-    * [ ] **Muscle Heat Map:** Render a human body SVG. Map `primary_muscles` strings to SVG paths.
-    * [ ] **Analytics:** Color code muscles by Volume (Red = High, Blue = Low) over the last 30 days.
+    * [x] **Muscle Heat Map:** Render a human body SVG. Map `primary_muscles` strings to SVG paths.
+    * [x] **Analytics:** Color code muscles by Volume (Red = High, Blue = Low) over the last 30 days.
 
 ---
 
@@ -72,13 +72,13 @@
     * **Supabase Edge Functions (Free Tier):**
         * `check_missed_workouts`: Runs nightly. If user missed schedule -> Sends FCM to Friends.
 * **Features:**
-    * [ ] **Versus Mode:** Live "Tonnage" counter using Supabase Realtime Broadcast channels.
-    * [ ] **Push Notifications:** Deep linking for Nudges and Invites.
+    * [x] **Versus Mode:** Live "Tonnage" counter using Supabase Realtime Broadcast channels.
+    * [x] **Push Notifications:** Deep linking for Nudges and Invites.
 
 ---
 
 ## v1.5.0: The Intelligence Update
 **Goal:** Conversational AI Coach.
 * **Features:**
-    * [ ] **Chat Interface:** RAG (Retrieval-Augmented Generation) on user's `workout_logs`.
-    * [ ] **Querying:** "Why is my bench press stalled?" -> AI analyzes volume/intensity trends.
+    * [x] **Chat Interface:** RAG (Retrieval-Augmented Generation) on user's `workout_logs`.
+    * [x] **Querying:** "Why is my bench press stalled?" -> AI analyzes volume/intensity trends.
