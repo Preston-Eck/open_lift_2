@@ -181,10 +181,10 @@ class SocialService {
     final friendIds = friends.map((f) => f['friend_id']).toList();
     if (friendIds.isEmpty) return [];
 
-    // Fetch logs from friends
+    // Fetch logs from friends (using 'logs' table on Supabase)
     final response = await _supabase
         .from('logs')
-        .select('*, profiles(username, avatar_url)')
+        .select('*, profiles:owner_id(username, avatar_url)')
         .in_('owner_id', friendIds)
         .order('timestamp', ascending: false)
         .limit(50);
@@ -192,13 +192,32 @@ class SocialService {
     return List<Map<String, dynamic>>.from(response);
   }
 
+  // --- COMMENTS & LIKES ---
+
+  Future<List<Map<String, dynamic>>> getComments(String logId) async {
+    final response = await _supabase
+        .from('workout_comments')
+        .select('*, profiles:user_id(username, avatar_url)')
+        .eq('log_id', logId)
+        .order('created_at', ascending: true);
+    return List<Map<String, dynamic>>.from(response);
+  }
+
+  Future<void> addComment(String logId, String text) async {
+    final myId = _auth.user!.id;
+    await _supabase.from('workout_comments').insert({
+      'log_id': logId,
+      'user_id': myId,
+      'text': text,
+    });
+  }
+
   Future<void> toggleLike(String logId) async {
     final myId = _auth.user!.id;
-    // Check if liked
     final existing = await _supabase
         .from('workout_likes')
         .select()
-        .eq('log_id', logId) // Assuming schema links to log_id, or session_id depending on granularity
+        .eq('log_id', logId)
         .eq('user_id', myId);
         
     if (existing.isNotEmpty) {
@@ -209,6 +228,14 @@ class SocialService {
         'user_id': myId,
       });
     }
+  }
+
+  Future<int> getLikeCount(String logId) async {
+     final response = await _supabase
+        .from('workout_likes')
+        .select('id', const FetchOptions(count: CountOption.exact))
+        .eq('log_id', logId);
+     return response.length;
   }
 
   // Helper

@@ -35,11 +35,14 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
   late String _sessionId;
   Map<String, String> _aliases = {}; 
   Map<String, double> _oneRepMaxes = {}; 
+  Map<String, Exercise> _exerciseMetadata = {}; 
 
   // Sequential Flow Data
   List<WorkoutExercise> _flatFlow = []; 
   int _currentStepIndex = 0;
-  double _sessionTotalTonnage = 0; // NEW
+  double _sessionTotalTonnage = 0; 
+  double _currentRpe = 7.0; 
+  bool _autoApplySmartRest = true; 
 
   // Controllers for current set
   final TextEditingController _weightController = TextEditingController();
@@ -53,9 +56,26 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
     _loadData();
     _generateFlatFlow();
     
-    // Auto-start the service
+    // Auto-start the service and sync draft
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<WorkoutPlayerService>().startWorkout();
+      final player = context.read<WorkoutPlayerService>();
+      
+      // Load current draft if exists
+      if (player.draftWeight.isNotEmpty) _weightController.text = player.draftWeight;
+      if (player.draftReps.isNotEmpty) _repsController.text = player.draftReps;
+      setState(() {
+         _currentRpe = player.draftRpe;
+      });
+
+      // Add listeners to preserve state
+      _weightController.addListener(() {
+         context.read<WorkoutPlayerService>().updateDraft(_weightController.text, null, null);
+      });
+      _repsController.addListener(() {
+         context.read<WorkoutPlayerService>().updateDraft(null, _repsController.text, null);
+      });
+
+      player.startWorkout();
       
       // Start Versus Mode if room ID exists
       if (widget.versusRoomId != null) {
@@ -88,6 +108,7 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
       duration: 0, 
       timestamp: DateTime.now().toIso8601String(),
       sessionId: _sessionId,
+      rpe: _currentRpe,
     );
 
     context.read<DatabaseService>().logSet(log);
@@ -101,8 +122,19 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
       context.read<RealtimeService>().broadcastTonnage(widget.versusRoomId!, _sessionTotalTonnage);
     }
     
-    // Clear for next set
+    // Auto-apply Smart Rest logic
+    if (_autoApplySmartRest && _currentRpe >= 9) {
+       context.read<WorkoutPlayerService>().setNextRestAdjust(30); // Add 30s automatically
+    }
+
+    // Clear draft in service
+    context.read<WorkoutPlayerService>().clearDraft(keepWeight: true);
+
+    // Clear local for next set
     _repsController.clear();
+    setState(() {
+      _currentRpe = 7.0;
+    });
   }
 
   void _generateFlatFlow() {
@@ -159,17 +191,83 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
     Map<String, double> maxes = {};
     if (widget.workoutDay != null) {
       for (var ex in widget.workoutDay!.exercises) {
+        // 1. One Rep Maxes
         final data = await db.getLatestOneRepMaxDetailed(ex.name);
         if (data != null) maxes[ex.name] = data['weight'];
+
+        // 2. Metadata (Pre-load)
+        // Check custom first
+        Exercise? meta = await db.findCustomExerciseByName(ex.name);
+        if (meta == null) {
+          // Check Supabase (standard list)
+          try {
+            final response = await Supabase.instance.client
+                .from('exercises')
+                .select()
+                .ilike('name', ex.name)
+                .limit(1)
+                .maybeSingle();
+            if (response != null) meta = Exercise.fromJson(response);
+          } catch (_) {}
+        }
+        if (meta != null) _exerciseMetadata[ex.name] = meta;
       }
     }
-    if (mounted) setState(() { _aliases = aliases; _oneRepMaxes = maxes; });
+    if (mounted) setState(() { 
+      _aliases = aliases; 
+      _oneRepMaxes = maxes;
+    });
   }
 
-  void _finishWorkout() {
+  Future<void> _finishWorkout() async {
+    final db = context.read<DatabaseService>();
+    final gemini = context.read<GeminiService>();
+    
+    // 1. Fetch Session Logs for AI Analysis
+    final logs = await db.getLogsForSession(_sessionId);
+    
+    // 2. Clear focus/player
     context.read<WorkoutPlayerService>().finishWorkout();
-    context.read<DatabaseService>().endSession(_sessionId, DateTime.now());
-    Navigator.pop(context);
+    await db.endSession(_sessionId, DateTime.now());
+
+    // 3. Show AI Insight (Blitz)
+    if (mounted && logs.isNotEmpty) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => FutureBuilder<String>(
+          future: gemini.generatePostWorkoutInsight(logs),
+          builder: (ctx, snapshot) {
+            final insight = snapshot.data ?? "...";
+            return AlertDialog(
+              backgroundColor: Colors.blueGrey.shade900,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: const Row(
+                children: [
+                  Icon(Icons.auto_awesome, color: Colors.amber, size: 20),
+                  SizedBox(width: 8),
+                  Text("COACH BLITZ", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                ],
+              ),
+              content: snapshot.connectionState == ConnectionState.waiting
+                  ? const SizedBox(height: 60, child: Center(child: CircularProgressIndicator(color: Colors.amber)))
+                  : Text(insight, style: const TextStyle(color: Colors.white, fontSize: 16)),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(ctx); // Close Dialog
+                    Navigator.pop(context); // Close Player
+                  },
+                  child: const Text("DONE", style: TextStyle(color: Colors.amber, fontWeight: FontWeight.bold)),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+    } else {
+      if (mounted) Navigator.pop(context);
+    }
   }
 
   @override
@@ -242,7 +340,8 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
           ),
         ],
       ),
-    }
+    );
+  }
 
   Widget _buildTimerDisplay(WorkoutPlayerService player) {
     Color color = Colors.blue;
@@ -266,7 +365,32 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
             _formatTime(player.timerSeconds),
             style: TextStyle(color: color, fontSize: 64, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
           ),
+          if (player.state == WorkoutState.resting) ...[
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _buildRestAdjustButton(player, -15, Icons.remove),
+                const SizedBox(width: 24),
+                _buildRestAdjustButton(player, 15, Icons.add),
+              ],
+            )
+          ]
         ],
+      ),
+    );
+  }
+
+  Widget _buildRestAdjustButton(WorkoutPlayerService player, int delta, IconData icon) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.1),
+        shape: BoxShape.circle,
+      ),
+      child: IconButton(
+        onPressed: () => player.adjustRestTime(delta),
+        icon: Icon(icon, color: Colors.green),
+        padding: const EdgeInsets.all(8),
       ),
     );
   }
@@ -290,6 +414,10 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
             textAlign: TextAlign.center,
             style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold),
           ),
+          const SizedBox(height: 8),
+
+          // HEATMAP / INFO FAST LINK
+          _buildExerciseQuickInfo(ex.name),
           const SizedBox(height: 32),
           
           // INPUTS
@@ -301,8 +429,77 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
               _buildLargeInput(ex.metricType == 'time' ? "SEC" : "REPS", ex.reps, _repsController),
             ],
           ),
+          const SizedBox(height: 48),
+
+          // RPE SLIDER
+          Text("EFFORT (RPE): ${_currentRpe.toInt()}", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Slider(
+            value: _currentRpe,
+            min: 1,
+            max: 10,
+            divisions: 9,
+            activeColor: _getRpeColor(_currentRpe),
+            label: _currentRpe.toInt().toString(),
+            onChanged: (val) {
+              setState(() => _currentRpe = val);
+              context.read<WorkoutPlayerService>().updateDraft(null, null, val);
+            },
+          ),
+          
+          if (_currentRpe >= 9) 
+             Padding(
+               padding: const EdgeInsets.only(top: 8.0),
+               child: Row(
+                 mainAxisAlignment: MainAxisAlignment.center,
+                 children: [
+                   const Text("🔥 High effort! ", 
+                     style: TextStyle(color: Colors.orange, fontSize: 12, fontWeight: FontWeight.bold)),
+                   const Text("Auto-apply +30s rest? ", style: TextStyle(color: Colors.grey, fontSize: 12)),
+                   Switch(
+                     value: _autoApplySmartRest, 
+                     onChanged: (v) => setState(() => _autoApplySmartRest = v),
+                     activeColor: Colors.orange,
+                     visualDensity: VisualDensity.compact,
+                   ),
+                 ],
+               ),
+             ),
         ],
       ),
+    );
+  }
+
+  Color _getRpeColor(double rpe) {
+    if (rpe < 6) return Colors.green;
+    if (rpe < 8) return Colors.yellow;
+    if (rpe < 9.5) return Colors.orange;
+    return Colors.red;
+  }
+
+  Widget _buildExerciseQuickInfo(String name) {
+    final meta = _exerciseMetadata[name];
+    if (meta == null) return const SizedBox.shrink();
+
+    return Column(
+      children: [
+        Wrap(
+          spacing: 4,
+          children: meta.primaryMuscles.map((m) => Chip(
+            label: Text(m, style: const TextStyle(fontSize: 10, color: Colors.white)),
+            backgroundColor: Colors.blueGrey.shade800,
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+          )).toList(),
+        ),
+        TextButton.icon(
+          onPressed: () {
+             Navigator.push(context, MaterialPageRoute(builder: (_) => ExerciseDetailScreen(exercise: meta!)));
+          },
+          icon: const Icon(Icons.info_outline, size: 16, color: Colors.blueAccent),
+          label: const Text("Form Guide", style: TextStyle(color: Colors.blueAccent, fontSize: 12)),
+        ),
+      ],
     );
   }
 

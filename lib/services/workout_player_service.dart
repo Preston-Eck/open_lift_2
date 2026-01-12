@@ -12,16 +12,41 @@ class WorkoutPlayerService extends ChangeNotifier {
   int _timerSeconds = 0;
   Timer? _timer;
   
-  // Progress tracking
   int _currentExerciseIndex = 0;
   int _currentSetIndex = 0;
-  
+
+  int _nextRestAdjust = 0; // Buffer for automated adjustments (s)
+
+  // Draft Set Persistence (v1.2.0)
+  String _draftWeight = "";
+  String _draftReps = "";
+  double _draftRpe = 7.0;
+
   WorkoutState get state => _state;
   int get timerSeconds => _timerSeconds;
   int get currentExerciseIndex => _currentExerciseIndex;
   int get currentSetIndex => _currentSetIndex;
+  
+  String get draftWeight => _draftWeight;
+  String get draftReps => _draftReps;
+  double get draftRpe => _draftRpe;
+
+  void updateDraft(String? weight, String? reps, double? rpe) {
+    if (weight != null) _draftWeight = weight;
+    if (reps != null) _draftReps = reps;
+    if (rpe != null) _draftRpe = rpe;
+    notifyListeners();
+  }
+
+  void clearDraft({bool keepWeight = true}) {
+    if (!keepWeight) _draftWeight = "";
+    _draftReps = "";
+    _draftRpe = 7.0;
+    notifyListeners();
+  }
 
   void startWorkout() {
+    clearDraft(keepWeight: false);
     _currentExerciseIndex = 0;
     _currentSetIndex = 1;
     _startCountdown();
@@ -61,7 +86,8 @@ class WorkoutPlayerService extends ChangeNotifier {
   void completeSet(int restTimeSeconds) {
     _timer?.cancel();
     _state = WorkoutState.resting;
-    _startRestTimer(restTimeSeconds);
+    _startRestTimer(restTimeSeconds + _nextRestAdjust);
+    _nextRestAdjust = 0; // Consumption
     notifyListeners();
   }
 
@@ -79,6 +105,16 @@ class WorkoutPlayerService extends ChangeNotifier {
     });
   }
 
+  void adjustRestTime(int deltaSeconds) {
+    if (_state != WorkoutState.resting) return;
+    _timerSeconds = (_timerSeconds + deltaSeconds).clamp(0, 999);
+    notifyListeners();
+  }
+
+  void setNextRestAdjust(int seconds) {
+    _nextRestAdjust = seconds;
+  }
+
   void _finishRest() {
     _timer?.cancel();
     _currentSetIndex++;
@@ -94,6 +130,7 @@ class WorkoutPlayerService extends ChangeNotifier {
   void finishWorkout() {
     _state = WorkoutState.finished;
     _timer?.cancel();
+    clearDraft(keepWeight: false);
     WakelockPlus.disable();
     notifyListeners();
   }

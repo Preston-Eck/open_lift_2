@@ -7,7 +7,8 @@ class LogEntry {
   final double volumeLoad;
   final int duration;
   final String timestamp;
-  final String? sessionId; // NEW: Links this set to a WorkoutSession
+  final String? sessionId;
+  final double? rpe; // NEW: Rate of Perceived Exertion
 
   LogEntry({
     required this.id,
@@ -18,7 +19,8 @@ class LogEntry {
     required this.volumeLoad,
     this.duration = 0,
     required this.timestamp,
-    this.sessionId, // Nullable for backward compatibility
+    this.sessionId,
+    this.rpe,
   });
 
   Map<String, dynamic> toMap() {
@@ -31,7 +33,8 @@ class LogEntry {
       'volume_load': volumeLoad,
       'duration': duration,
       'timestamp': timestamp,
-      'session_id': sessionId, // NEW column
+      'session_id': sessionId,
+      'rpe': rpe,
     };
   }
 
@@ -45,7 +48,8 @@ class LogEntry {
       volumeLoad: map['volume_load'],
       duration: map['duration'] ?? 0,
       timestamp: map['timestamp'],
-      sessionId: map['session_id'], // Handle older null records gracefully
+      sessionId: map['session_id'],
+      rpe: map['rpe']?.toDouble(),
     );
   }
 }

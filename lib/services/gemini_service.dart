@@ -300,7 +300,12 @@ class GeminiService {
       1. Answer questions about fitness, form, programming, and nutrition.
       2. Use the user's specific context.
       3. If specific history is provided, analyze the trend (Volume, Intensity, Frequency) to answer questions like "Why am I stalled?".
-      4. Be encouraging but direct. 
+      4. RPE (Rate of Perceived Exertion): Users rate sets from 1-10. 
+         - RPE 10 = Max effort (no reps left).
+         - RPE 7-9 = Optimal for strength/hypertrophy.
+         - RPE < 6 = Warm-up or low intensity.
+         - Use this to detect if a lack of progress is due to low intensity (sandbagging) or overtraining (too many RPE 10s).
+      5. Be encouraging but direct. 
       
       === STYLE ===
       Concise, actionable, professional yet friendly.
@@ -377,6 +382,39 @@ class GeminiService {
         "improvements": [],
         "next_week_goals": []
       };
+    }
+  }
+
+  /// NEW: Post-Workout Quick Insight
+  Future<String> generatePostWorkoutInsight(List<LogEntry> sessionLogs) async {
+    if (sessionLogs.isEmpty) return "";
+    
+    final logsJson = sessionLogs.map((l) => {
+      'exercise': l.exerciseName,
+      'weight': l.weight,
+      'reps': l.reps,
+      'rpe': l.rpe,
+    }).toList();
+
+    final prompt = '''
+      You are "OpenLift Coach". The user just finished a workout.
+      Analyze these logs: ${jsonEncode(logsJson)}
+      
+      Task: Provide a ONE-SENTENCE high-value technical or motivational insight.
+      - If RPE is high across the board, emphasize recovery/sleep.
+      - If RPE is low, suggest increasing weight next time.
+      - If one exercise was much harder than others, mention the imbalance.
+      
+      BE BRIEF. 20 words max.
+    ''';
+
+    try {
+      final content = [Content.text(prompt)];
+      final response = await _model.generateContent(content);
+      return response.text?.trim() ?? "";
+    } catch (e) {
+      debugPrint("Post-Workout Insight Error: $e");
+      return "";
     }
   }
 }

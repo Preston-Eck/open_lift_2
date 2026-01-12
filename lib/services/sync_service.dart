@@ -7,10 +7,16 @@ import 'dart:convert' as import_convert;
 import 'database_service.dart';
 import 'auth_service.dart';
 
-class SyncService {
+class SyncService extends ChangeNotifier {
   final DatabaseService _db;
   final AuthService _auth;
   final SupabaseClient _supabase = Supabase.instance.client;
+
+  bool _isSyncing = false;
+  bool get isSyncing => _isSyncing;
+
+  String? _lastError;
+  String? get lastError => _lastError;
 
   SyncService(this._db, this._auth);
 
@@ -31,25 +37,36 @@ class SyncService {
     final lastSyncTime = prefs.getString('last_sync_timestamp') ?? '1970-01-01T00:00:00.000Z';
     debugPrint("🔄 Syncing from: $lastSyncTime");
 
+    _isSyncing = true;
+    _lastError = null;
+    notifyListeners();
+
     try {
+      // 1. Core Metadata & Equipment (Dependencies first)
       await _pushEquipment();
       await _pullEquipment(lastSyncTime);
       await _pushCustomExercises();
       await _pullCustomExercises(lastSyncTime);
-      
-      // NEW: Sync Gym Profiles (v17)
       await _pushGymProfiles();
       await _pullGymProfiles(lastSyncTime);
 
+      // 2. User Data (Plans & Logs)
       await _pushPlans();
-      await _pullPlans(); 
+      await _pullPlans(lastSyncTime); 
       await _pushLogs();
-      await _pullLogs(); 
+      await _pullLogs(lastSyncTime); 
 
       await prefs.setString('last_sync_timestamp', DateTime.now().toIso8601String());
       debugPrint("✅ Sync Complete.");
+    } on PostgrestException catch (e) {
+       _lastError = "Database Sync Error: ${e.message}";
+       debugPrint("❌ $_lastError");
     } catch (e) {
-      debugPrint("❌ Sync Error: $e");
+      _lastError = "General Sync Error: $e";
+      debugPrint("❌ $_lastError");
+    } finally {
+      _isSyncing = false;
+      notifyListeners();
     }
   }
 
@@ -61,34 +78,29 @@ class SyncService {
 
     if (unsynced.isEmpty) return;
 
-    for (var gym in unsynced) {
-      final gymId = gym['id'] as String;
-      
-      // 1. Push Profile Metadata
-      final profileData = {
-        'id': gymId,
+    final batch = unsynced.map((gym) {
+      return {
+        'id': gym['id'],
         'owner_id': userId,
         'name': gym['name'],
         'is_default': gym['is_default'],
         'created_at': gym['created_at'],
         'updated_at': gym['last_updated'] ?? DateTime.now().toIso8601String(),
+        'deleted_at': gym['deleted_at'], // Tombstone
       };
-      
-      await _supabase.from('gym_profiles').upsert(profileData);
+    }).toList();
 
-      // 2. Push Equipment List (Full Replace Strategy)
-      // fetch local items
+    await _supabase.from('gym_profiles').upsert(batch);
+
+    // For each non-deleted gym, we still might need to push its equipment list
+    // (Existing logic for gym_equipment is simplistic "full replace")
+    for (var gym in unsynced) {
+      if (gym['deleted_at'] != null) continue;
+      final gymId = gym['id'] as String;
       final equipmentIds = await _db.getGymItemIds(gymId);
-      
-      // Delete existing on remote (simulated replace)
       await _supabase.from('gym_equipment').delete().eq('gym_id', gymId);
-      
-      // Insert current
       if (equipmentIds.isNotEmpty) {
-        final equipBatch = equipmentIds.map((eid) => {
-          'gym_id': gymId,
-          'equipment_id': eid
-        }).toList();
+        final equipBatch = equipmentIds.map((eid) => {'gym_id': gymId, 'equipment_id': eid}).toList();
         await _supabase.from('gym_equipment').upsert(equipBatch);
       }
     }
@@ -116,12 +128,14 @@ class SyncService {
           'created_at': row['created_at'],
           'owner_id': row['owner_id'],
           'last_updated': row['updated_at'],
+          'deleted_at': row['deleted_at'],
         });
       }
       await _db.bulkUpsertGymProfiles(localBatch);
       
       // 2. For each updated gym, fetch its equipment list
       for (var row in response) {
+        if (row['deleted_at'] != null) continue;
         final gymId = row['id'] as String;
         final equipResponse = await _supabase
             .from('gym_equipment')
@@ -194,6 +208,7 @@ class SyncService {
         'is_owned': e['is_owned'],
         'capabilities_json': e['capabilities_json'],
         'updated_at': e['last_updated'] ?? DateTime.now().toIso8601String(),
+        'deleted_at': e['deleted_at'],
       };
     }).toList();
 
@@ -245,6 +260,7 @@ class SyncService {
           'is_owned': row['is_owned'],
           'capabilities_json': row['capabilities_json'],
           'last_updated': row['updated_at'],
+          'deleted_at': row['deleted_at'],
         });
       }
     }
@@ -272,6 +288,7 @@ class SyncService {
             ? List<String>.from(Helpers.safeJsonDecode(e['equipment_json'])) 
             : [],
         'updated_at': e['last_updated'] ?? DateTime.now().toIso8601String(),
+        'deleted_at': e['deleted_at'],
       };
     }).toList();
 
@@ -325,6 +342,7 @@ class SyncService {
           'notes': row['notes'],
           'equipment_json': equipJson,
           'last_updated': row['updated_at'],
+          'deleted_at': row['deleted_at'],
         });
       }
     }
@@ -335,10 +353,11 @@ class SyncService {
   }
 
   Future<void> _pushPlans() async {
-    final localPlans = await _db.getAllPlansRaw();
-    if (localPlans.isEmpty) return;
+    final unsynced = await _db.getUnsyncedPlans();
+    if (unsynced.isEmpty) return;
+    
     final userId = _auth.user!.id;
-    final batch = localPlans.map((p) => {
+    final batch = unsynced.map((p) => {
       'id': p['id'],
       'owner_id': userId,
       'name': p['name'],
@@ -346,13 +365,22 @@ class SyncService {
       'type': p['type'],
       'schedule_json': p['schedule_json'],
       'updated_at': p['last_updated'] ?? DateTime.now().toIso8601String(),
+      'deleted_at': p['deleted_at'],
     }).toList();
+    
     await _supabase.from('plans').upsert(batch);
+    await _db.markPlansSynced(unsynced.map((p) => p['id'] as String).toList());
   }
 
-  Future<void> _pullPlans() async {
+  Future<void> _pullPlans(String lastSyncTime) async {
     final userId = _auth.user!.id;
-    final response = await _supabase.from('plans').select().eq('owner_id', userId);
+    final response = await _supabase.from('plans')
+      .select()
+      .eq('owner_id', userId)
+      .gt('updated_at', lastSyncTime);
+
+    if (response.isEmpty) return;
+
     final List<Map<String, dynamic>> plans = [];
     for (var row in response) {
       plans.add({
@@ -362,19 +390,21 @@ class SyncService {
         'type': row['type'],
         'schedule_json': row['schedule_json'],
         'last_updated': row['updated_at'],
+        'deleted_at': row['deleted_at'],
       });
     }
     await _db.bulkInsertPlans(plans);
   }
 
   Future<void> _pushLogs() async {
-    final localLogs = await _db.getAllLogsRaw();
-    if (localLogs.isEmpty) return;
+    final unsynced = await _db.getUnsyncedLogs();
+    if (unsynced.isEmpty) return;
+    
     final userId = _auth.user!.id;
-    const int batchSize = 500;
-    for (var i = 0; i < localLogs.length; i += batchSize) {
-      final end = (i + batchSize < localLogs.length) ? i + batchSize : localLogs.length;
-      final chunk = localLogs.sublist(i, end);
+    const int batchSize = 200;
+    
+    for (var i = 0; i < unsynced.length; i += batchSize) {
+      final chunk = unsynced.sublist(i, (i + batchSize < unsynced.length) ? i + batchSize : unsynced.length);
       final batch = chunk.map((l) => {
         'id': l['id'],
         'owner_id': userId,
@@ -385,14 +415,27 @@ class SyncService {
         'volume_load': l['volume_load'],
         'timestamp': l['timestamp'],
         'updated_at': l['last_updated'] ?? DateTime.now().toIso8601String(),
+        'deleted_at': l['deleted_at'],
+        'rpe': l['rpe'],
       }).toList();
+      
       await _supabase.from('logs').upsert(batch);
     }
+    
+    await _db.markLogsSynced(unsynced.map((l) => l['id'] as String).toList());
   }
 
-  Future<void> _pullLogs() async {
+  Future<void> _pullLogs(String lastSyncTime) async {
     final userId = _auth.user!.id;
-    final response = await _supabase.from('logs').select().eq('owner_id', userId).order('timestamp', ascending: false).limit(1000);
+    final response = await _supabase.from('logs')
+      .select()
+      .eq('owner_id', userId)
+      .gt('updated_at', lastSyncTime)
+      .order('timestamp', ascending: false)
+      .limit(1000);
+
+    if (response.isEmpty) return;
+
     final List<Map<String, dynamic>> logs = [];
     for (var row in response) {
       logs.add({
@@ -406,6 +449,8 @@ class SyncService {
         'timestamp': row['timestamp'],
         'duration': 0,
         'last_updated': row['updated_at'],
+        'deleted_at': row['deleted_at'],
+        'rpe': row['rpe'],
       });
     }
     await _db.bulkInsertLogs(logs);

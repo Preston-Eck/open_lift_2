@@ -147,6 +147,7 @@ class _SocialDashboardScreenState extends State<SocialDashboardScreen> with Sing
           final exercise = log['exercise_name'] ?? 'Exercise';
           final weight = log['weight'];
           final reps = log['reps'];
+          final rpe = log['rpe'];
           final time = DateTime.tryParse(log['timestamp'] ?? '') ?? DateTime.now();
 
           return Card(
@@ -162,28 +163,39 @@ class _SocialDashboardScreenState extends State<SocialDashboardScreen> with Sing
                       const SizedBox(width: 8),
                       Text(username, style: const TextStyle(fontWeight: FontWeight.bold)),
                       const Spacer(),
-                      Text(DateFormat('MMM d, h:mm a').format(time), style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                      Text(DateFormat('MMM d').format(time), style: const TextStyle(color: Colors.grey, fontSize: 12)),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  Text("did $exercise", style: const TextStyle(fontSize: 16)),
-                  const SizedBox(height: 4),
-                  Text("$weight lbs x $reps reps", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.deepPurple)),
                   const SizedBox(height: 12),
+                  Text("did $exercise", style: const TextStyle(fontSize: 14, color: Colors.grey)),
+                  const SizedBox(height: 4),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
+                    children: [
+                      Text("${weight.toInt()} lbs x $reps", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 24, color: Colors.deepPurple)),
+                      if (rpe != null) ...[
+                        const SizedBox(width: 8),
+                        Text("@ RPE ${rpe.toInt()}", style: TextStyle(color: Colors.orange.shade700, fontSize: 12, fontWeight: FontWeight.bold)),
+                      ]
+                    ],
+                  ),
+                  const Divider(height: 24),
                   Row(
                     children: [
                       IconButton(
                         icon: const Icon(Icons.thumb_up_alt_outlined, size: 20),
-                        onPressed: () {
-                           // Optimistic UI update could go here
-                           context.read<SocialService>().toggleLike(log['id']);
-                           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Liked!")));
+                        onPressed: () async {
+                           await context.read<SocialService>().toggleLike(log['id']);
+                           _fetchActivity(); // Refresh to show counts if possible
                         },
                       ),
                       const Text("Like"),
-                      const SizedBox(width: 16),
-                      const Icon(Icons.comment_outlined, size: 20),
-                      const SizedBox(width: 4),
+                      const SizedBox(width: 24),
+                      IconButton(
+                        icon: const Icon(Icons.comment_outlined, size: 20),
+                        onPressed: () => _showCommentsSheet(log['id']),
+                      ),
                       const Text("Comment"),
                     ],
                   )
@@ -193,6 +205,15 @@ class _SocialDashboardScreenState extends State<SocialDashboardScreen> with Sing
           );
         },
       ),
+    );
+  }
+
+  void _showCommentsSheet(String logId) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => _CommentSheet(logId: logId),
     );
   }
 
@@ -291,6 +312,89 @@ class _SocialDashboardScreenState extends State<SocialDashboardScreen> with Sing
                 ),
               );
             }),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CommentSheet extends StatefulWidget {
+  final String logId;
+  const _CommentSheet({required this.logId});
+
+  @override
+  State<_CommentSheet> createState() => _CommentSheetState();
+}
+
+class _CommentSheetState extends State<_CommentSheet> {
+  final TextEditingController _controller = TextEditingController();
+  List<Map<String, dynamic>> _comments = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadComments();
+  }
+
+  Future<void> _loadComments() async {
+    final data = await context.read<SocialService>().getComments(widget.logId);
+    if (mounted) setState(() { _comments = data; _isLoading = false; });
+  }
+
+  Future<void> _postComment() async {
+    if (_controller.text.trim().isEmpty) return;
+    final text = _controller.text.trim();
+    _controller.clear();
+    
+    await context.read<SocialService>().addComment(widget.logId, text);
+    _loadComments();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Container(
+        height: MediaQuery.of(context).size.height * 0.6,
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text("Comments", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            Expanded(
+              child: _isLoading ? const Center(child: CircularProgressIndicator()) :
+              _comments.isEmpty ? const Center(child: Text("Be the first to comment!", style: TextStyle(color: Colors.grey))) :
+              ListView.builder(
+                itemCount: _comments.length,
+                itemBuilder: (ctx, i) {
+                  final c = _comments[i];
+                  final user = c['profiles'] ?? {};
+                  return ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: CircleAvatar(radius: 12, child: Text(user['username']?[0].toUpperCase() ?? "?", style: const TextStyle(fontSize: 10))),
+                    title: Text(user['username'] ?? "Unknown", style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text(c['text']),
+                  );
+                },
+              ),
+            ),
+            const Divider(),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _controller,
+                    decoration: const InputDecoration(hintText: "Write a comment...", border: InputBorder.none),
+                    onSubmitted: (_) => _postComment(),
+                  ),
+                ),
+                IconButton(icon: const Icon(Icons.send, color: Colors.deepPurple), onPressed: _postComment),
+              ],
+            )
           ],
         ),
       ),

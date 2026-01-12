@@ -89,8 +89,9 @@ Future<void> main() async {
           ),
 
           // 2. Sync depends on DB and Auth
-          ProxyProvider2<DatabaseService, AuthService, SyncService>(
-            update: (_, db, auth, __) => SyncService(db, auth),
+          ChangeNotifierProxyProvider2<DatabaseService, AuthService, SyncService>(
+            create: (ctx) => SyncService(ctx.read<DatabaseService>(), ctx.read<AuthService>()),
+            update: (ctx, db, auth, sync) => sync ?? SyncService(db, auth),
           ),
           
           // 3. Social depends on Auth

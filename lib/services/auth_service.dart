@@ -78,4 +78,15 @@ class AuthService extends ChangeNotifier {
       debugPrint("Error updating FCM token: $e");
     }
   }
+
+  Future<void> updateLastSeen() async {
+    if (_user == null) return;
+    try {
+      await _supabase.from('profiles').update({
+        'last_seen': DateTime.now().toUtc().toIso8601String()
+      }).eq('id', _user!.id);
+    } catch (e) {
+      debugPrint("Error updating last seen: $e");
+    }
+  }
 }

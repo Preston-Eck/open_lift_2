@@ -15,7 +15,9 @@ import '../services/gemini_service.dart'; // NEW
 import '../config/equipment_bundles.dart';
 import '../theme.dart';
 import '../widgets/exercise_selection_dialog.dart';
+import '../widgets/user_picker_dialog.dart'; // NEW
 import '../models/exercise.dart'; // NEW
+import '../services/social_service.dart'; // NEW
 
 class EquipmentManagerScreen extends StatefulWidget {
 // ... (rest of EquipmentManagerScreen remains the same)
@@ -111,6 +113,22 @@ class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> with Si
               onPressed: () {
                 Clipboard.setData(ClipboardData(text: _currentGymId!));
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Copied to clipboard")));
+              },
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.person_add),
+              label: const Text("Send to Friend"),
+              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.renewalTeal, foregroundColor: Colors.white),
+              onPressed: () async {
+                final friendId = await showDialog<String>(
+                  context: context,
+                  builder: (ctx) => const UserPickerDialog(title: "Invite Friend to Gym"),
+                );
+                if (friendId != null && mounted) {
+                  await context.read<SocialService>().sendGymInvite(_currentGymId!, _currentGymName ?? "Shared Gym", friendId);
+                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Invite Sent!")));
+                }
               },
             ),
             const Divider(height: 32),

@@ -41,7 +41,7 @@ class _AICoachScreenState extends State<AICoachScreen> {
 
     // 4. Recent Logs
     final logs = await db.getHistory();
-    final logsStr = logs.take(10).map((l) => "${l.timestamp.substring(0,10)}: ${l.exerciseName} ${l.weight}x${l.reps}").join('\n');
+    final logsStr = logs.take(10).map((l) => "${l.timestamp.substring(0,10)}: ${l.exerciseName} ${l.weight}x${l.reps} (RPE: ${l.rpe ?? 'N/A'})").join('\n');
 
     setState(() {
       _contextData = {
@@ -82,7 +82,7 @@ class _AICoachScreenState extends State<AICoachScreen> {
         if (text.toLowerCase().contains(name.toLowerCase())) {
           final history = await db.getHistoryForExercise(name);
           specificHistory += "\nHistory for $name:\n" + 
-            history.take(20).map((l) => "${l.timestamp.substring(0,10)}: ${l.weight}x${l.reps} (Vol: ${l.volumeLoad})").join('\n');
+            history.take(20).map((l) => "${l.timestamp.substring(0,10)}: ${l.weight}x${l.reps} (Vol: ${l.volumeLoad}, RPE: ${l.rpe ?? 'N/A'})").join('\n');
           break; // Found one, stop for now to keep context window clean
         }
       }

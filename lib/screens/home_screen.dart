@@ -19,25 +19,51 @@ import 'social_dashboard_screen.dart';
 import 'exercise_auditor_screen.dart'; 
 import '../widgets/gym_selector.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  bool _wasSyncing = false;
 
   @override
   Widget build(BuildContext context) {
     final auth = Provider.of<AuthService>(context);
     final db = Provider.of<DatabaseService>(context);
+    final sync = Provider.of<SyncService>(context);
+
+    // Listen for sync completion to show result
+    if (_wasSyncing && !sync.isSyncing) {
+       WidgetsBinding.instance.addPostFrameCallback((_) {
+         if (sync.lastError != null) {
+           ScaffoldMessenger.of(context).showSnackBar(
+             SnackBar(content: Text(sync.lastError!), backgroundColor: Colors.red),
+           );
+         } else {
+           ScaffoldMessenger.of(context).showSnackBar(
+             const SnackBar(content: Text("✅ Sync Successful"), backgroundColor: Colors.green),
+           );
+         }
+       });
+    }
+    _wasSyncing = sync.isSyncing;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text("Dashboard"),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.cloud_sync),
-            tooltip: "Sync Data",
-            onPressed: () {
-              final sync = Provider.of<SyncService>(context, listen: false);
-              sync.syncAll();
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Sync Started...")));
+          Consumer<SyncService>(
+            builder: (context, sync, child) {
+              return IconButton(
+                icon: sync.isSyncing 
+                  ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Icon(Icons.cloud_sync),
+                tooltip: sync.isSyncing ? "Syncing..." : "Sync Data",
+                onPressed: sync.isSyncing ? null : () => sync.syncAll(),
+              );
             },
           ),
           IconButton(

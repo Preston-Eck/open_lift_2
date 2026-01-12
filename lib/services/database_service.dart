@@ -53,7 +53,7 @@ class DatabaseService extends ChangeNotifier {
 
         return await openDatabase(
           path,
-          version: 18,
+          version: 20,
           onCreate: (db, version) async {
             await _createTables(db);
             await _createProfileTable(db);
@@ -147,22 +147,38 @@ class DatabaseService extends ChangeNotifier {
              await db.execute('ALTER TABLE gym_members ADD COLUMN invited_by TEXT');
            } catch (_) {} 
         }
+        if (oldVersion < 19) {
+           debugPrint("⚡ Migrating to v19: Tombstones & Incremental Sync...");
+           try {
+             await db.execute('ALTER TABLE workout_logs ADD COLUMN synced INTEGER DEFAULT 0');
+             await db.execute('ALTER TABLE workout_logs ADD COLUMN deleted_at TEXT');
+             await db.execute('ALTER TABLE workout_plans ADD COLUMN synced INTEGER DEFAULT 0');
+             await db.execute('ALTER TABLE workout_plans ADD COLUMN deleted_at TEXT');
+             await db.execute('ALTER TABLE user_equipment ADD COLUMN deleted_at TEXT');
+             await db.execute('ALTER TABLE custom_exercises ADD COLUMN deleted_at TEXT');
+             await db.execute('ALTER TABLE gym_profiles ADD COLUMN deleted_at TEXT');
+             
+             // Assume existing logs/plans are synced to avoid massive push if they were already on Supabase
+             await db.execute('UPDATE workout_logs SET synced = 1');
+             await db.execute('UPDATE workout_plans SET synced = 1');
+           } catch (_) {}
+        }
       }
     );
   }
 
   Future<void> _createTables(Database db) async {
-    await db.execute('CREATE TABLE user_equipment (id TEXT PRIMARY KEY, name TEXT, is_owned INTEGER, capabilities_json TEXT, last_updated TEXT, synced INTEGER DEFAULT 0)');
-    await db.execute('CREATE TABLE workout_logs (id TEXT PRIMARY KEY, exercise_id TEXT, exercise_name TEXT, weight REAL, reps INTEGER, volume_load REAL, duration INTEGER, timestamp TEXT, session_id TEXT, last_updated TEXT)');
-    await db.execute('CREATE TABLE workout_plans (id TEXT PRIMARY KEY, name TEXT, goal TEXT, type TEXT, schedule_json TEXT, last_updated TEXT)');
+    await db.execute('CREATE TABLE user_equipment (id TEXT PRIMARY KEY, name TEXT, is_owned INTEGER, capabilities_json TEXT, last_updated TEXT, synced INTEGER DEFAULT 0, deleted_at TEXT)');
+    await db.execute('CREATE TABLE workout_logs (id TEXT PRIMARY KEY, exercise_id TEXT, exercise_name TEXT, weight REAL, reps INTEGER, volume_load REAL, duration INTEGER, timestamp TEXT, session_id TEXT, last_updated TEXT, synced INTEGER DEFAULT 0, deleted_at TEXT, rpe REAL)');
+    await db.execute('CREATE TABLE workout_plans (id TEXT PRIMARY KEY, name TEXT, goal TEXT, type TEXT, schedule_json TEXT, last_updated TEXT, synced INTEGER DEFAULT 0, deleted_at TEXT)');
     await db.execute('CREATE TABLE exercise_stats (exercise_name TEXT PRIMARY KEY, one_rep_max REAL, last_updated TEXT)');
     await db.execute('CREATE TABLE body_metrics (id TEXT PRIMARY KEY, date TEXT, weight REAL, measurements_json TEXT)');
     await db.execute('CREATE TABLE one_rep_max_history (id TEXT PRIMARY KEY, exercise_name TEXT, weight REAL, date TEXT)');
-    await db.execute('CREATE TABLE custom_exercises (id TEXT PRIMARY KEY, name TEXT, category TEXT, primary_muscles TEXT, notes TEXT, equipment_json TEXT, last_updated TEXT, synced INTEGER DEFAULT 0)');
+    await db.execute('CREATE TABLE custom_exercises (id TEXT PRIMARY KEY, name TEXT, category TEXT, primary_muscles TEXT, notes TEXT, equipment_json TEXT, last_updated TEXT, synced INTEGER DEFAULT 0, deleted_at TEXT)');
     await db.execute('CREATE TABLE workout_sessions (id TEXT PRIMARY KEY, plan_id TEXT, day_name TEXT, start_time TEXT, end_time TEXT, note TEXT)');
     await db.execute('CREATE TABLE exercise_aliases (original_name TEXT PRIMARY KEY, alias TEXT)');
     
-    await db.execute('CREATE TABLE gym_profiles (id TEXT PRIMARY KEY, name TEXT, is_default INTEGER, created_at TEXT, owner_id TEXT, last_updated TEXT, synced INTEGER DEFAULT 0)');
+    await db.execute('CREATE TABLE gym_profiles (id TEXT PRIMARY KEY, name TEXT, is_default INTEGER, created_at TEXT, owner_id TEXT, last_updated TEXT, synced INTEGER DEFAULT 0, deleted_at TEXT)');
     await db.execute('CREATE TABLE gym_equipment (gym_id TEXT, equipment_id TEXT, PRIMARY KEY (gym_id, equipment_id))');
     await db.execute('CREATE TABLE gym_members (id TEXT PRIMARY KEY, gym_id TEXT, user_id TEXT, nickname TEXT, can_edit_gear INTEGER DEFAULT 0, status TEXT, invited_by TEXT)');
   }
@@ -181,7 +197,9 @@ class DatabaseService extends ChangeNotifier {
 
   Future<List<GymProfile>> getGymProfiles() async {
     final db = await database;
-    final owned = await db.query('gym_profiles', where: 'owner_id = ?', whereArgs: [_currentUserId]);
+    final owned = await db.query('gym_profiles', 
+      where: 'owner_id = ? AND deleted_at IS NULL', 
+      whereArgs: [_currentUserId]);
     final memberRows = await db.query('gym_members', where: 'user_id = ?', whereArgs: [_currentUserId]);
     
     List<GymProfile> allGyms = [];
@@ -212,6 +230,7 @@ class DatabaseService extends ChangeNotifier {
       'owner_id': _currentUserId, 
       'last_updated': DateTime.now().toIso8601String(),
       'synced': 0,
+      'deleted_at': null,
     });
     notifyListeners();
     return id;
@@ -240,10 +259,16 @@ class DatabaseService extends ChangeNotifier {
     if (gym.isEmpty) return;
     final ownerId = gym.first['owner_id'] as String?;
     if (ownerId == _currentUserId) {
-      await db.delete('gym_profiles', where: 'id = ?', whereArgs: [id]);
-      await db.delete('gym_equipment', where: 'gym_id = ?', whereArgs: [id]);
-      await db.delete('gym_members', where: 'gym_id = ?', whereArgs: [id]);
+      // Soft Delete for sync
+      await db.update('gym_profiles', {
+        'deleted_at': DateTime.now().toIso8601String(),
+        'synced': 0
+      }, where: 'id = ?', whereArgs: [id]);
+      
+      // We keep gym_equipment and gym_members for now; 
+      // typically we'd only sync the profiles tombstone.
     } else {
+      // Member leaving a gym - this is a local action on membership
       await db.delete('gym_members', where: 'gym_id = ? AND user_id = ?', whereArgs: [id, _currentUserId]);
     }
     notifyListeners();
@@ -267,7 +292,7 @@ class DatabaseService extends ChangeNotifier {
       SELECT e.name, e.capabilities_json 
       FROM user_equipment e
       JOIN gym_equipment ge ON e.id = ge.equipment_id
-      WHERE ge.gym_id = ?
+      WHERE ge.gym_id = ? AND e.deleted_at IS NULL
     ''', [targetGymId]);
     final Set<String> capabilities = {};
     for (var row in res) {
@@ -308,9 +333,22 @@ class DatabaseService extends ChangeNotifier {
     final now = DateTime.now().toIso8601String();
     final existing = await db.query('user_equipment', where: 'id = ?', whereArgs: [name]);
     if (existing.isNotEmpty) {
-      await db.update('user_equipment', {'is_owned': isOwned ? 1 : 0, 'last_updated': now, 'synced': 0}, where: 'id = ?', whereArgs: [name]);
+      await db.update('user_equipment', {
+        'is_owned': isOwned ? 1 : 0, 
+        'last_updated': now, 
+        'synced': 0,
+        'deleted_at': null, // Undelete if reactivated
+      }, where: 'id = ?', whereArgs: [name]);
     } else {
-      await db.insert('user_equipment', {'id': name, 'name': name, 'is_owned': isOwned ? 1 : 0, 'capabilities_json': jsonEncode([name]), 'last_updated': now, 'synced': 0});
+      await db.insert('user_equipment', {
+        'id': name, 
+        'name': name, 
+        'is_owned': isOwned ? 1 : 0, 
+        'capabilities_json': jsonEncode([name]), 
+        'last_updated': now, 
+        'synced': 0,
+        'deleted_at': null
+      });
     }
     notifyListeners();
   }
@@ -325,19 +363,26 @@ class DatabaseService extends ChangeNotifier {
   Future<List<String>> getOwnedEquipment() async => getActiveEquipment();
   Future<List<String>> getOwnedItemNames() async {
     final db = await database;
-    final res = await db.query('user_equipment', where: 'is_owned = 1');
+    final res = await db.query('user_equipment', where: 'is_owned = 1 AND deleted_at IS NULL');
     return res.map((e) => e['name'] as String).toList();
   }
-  Future<List<Map<String, dynamic>>> getUserEquipmentList() async { final db = await database; return await db.query('user_equipment'); }
+  Future<List<Map<String, dynamic>>> getUserEquipmentList() async { 
+    final db = await database; 
+    return await db.query('user_equipment', where: 'deleted_at IS NULL'); 
+  }
 
   // --- SYNC HELPERS ---
   Future<List<Map<String, dynamic>>> getUnsyncedEquipment() async { final db = await database; return await db.query('user_equipment', where: 'synced = 0'); }
   Future<List<Map<String, dynamic>>> getUnsyncedCustomExercises() async { final db = await database; return await db.query('custom_exercises', where: 'synced = 0'); }
   Future<List<Map<String, dynamic>>> getUnsyncedGymProfiles() async { final db = await database; return await db.query('gym_profiles', where: 'synced = 0 AND owner_id = ?', whereArgs: [_currentUserId]); }
+  Future<List<Map<String, dynamic>>> getUnsyncedPlans() async { final db = await database; return await db.query('workout_plans', where: 'synced = 0'); }
+  Future<List<Map<String, dynamic>>> getUnsyncedLogs() async { final db = await database; return await db.query('workout_logs', where: 'synced = 0'); }
   
   Future<void> markEquipmentSynced(List<String> ids) async { final db = await database; final batch = db.batch(); for (var id in ids) { batch.update('user_equipment', {'synced': 1}, where: 'id = ?', whereArgs: [id]); } await batch.commit(noResult: true); }
   Future<void> markCustomExercisesSynced(List<String> ids) async { final db = await database; final batch = db.batch(); for (var id in ids) { batch.update('custom_exercises', {'synced': 1}, where: 'id = ?', whereArgs: [id]); } await batch.commit(noResult: true); }
   Future<void> markGymProfilesSynced(List<String> ids) async { final db = await database; final batch = db.batch(); for (var id in ids) { batch.update('gym_profiles', {'synced': 1}, where: 'id = ?', whereArgs: [id]); } await batch.commit(noResult: true); }
+  Future<void> markPlansSynced(List<String> ids) async { final db = await database; final batch = db.batch(); for (var id in ids) { batch.update('workout_plans', {'synced': 1}, where: 'id = ?', whereArgs: [id]); } await batch.commit(noResult: true); }
+  Future<void> markLogsSynced(List<String> ids) async { final db = await database; final batch = db.batch(); for (var id in ids) { batch.update('workout_logs', {'synced': 1}, where: 'id = ?', whereArgs: [id]); } await batch.commit(noResult: true); }
 
   Future<void> bulkUpsertEquipment(List<Map<String, dynamic>> items) async { final db = await database; final batch = db.batch(); for (var item in items) { final row = Map<String, dynamic>.from(item); row['synced'] = 1; batch.insert('user_equipment', row, conflictAlgorithm: ConflictAlgorithm.replace); } await batch.commit(noResult: true); notifyListeners(); }
   Future<void> bulkUpsertCustomExercises(List<Map<String, dynamic>> items) async { final db = await database; final batch = db.batch(); for (var item in items) { final row = Map<String, dynamic>.from(item); row['synced'] = 1; batch.insert('custom_exercises', row, conflictAlgorithm: ConflictAlgorithm.replace); } await batch.commit(noResult: true); notifyListeners(); }
@@ -360,13 +405,14 @@ class DatabaseService extends ChangeNotifier {
     final now = DateTime.now().toIso8601String();
     await db.insert('custom_exercises', {
       'id': ex.id, 'name': ex.name, 'category': ex.category, 'primary_muscles': ex.primaryMuscles.join(','),
-      'notes': ex.instructions.join('\n'), 'equipment_json': jsonEncode(ex.equipment), 'last_updated': now, 'synced': 0
+      'notes': ex.instructions.join('\n'), 'equipment_json': jsonEncode(ex.equipment), 
+      'last_updated': now, 'synced': 0, 'deleted_at': null
     }, conflictAlgorithm: ConflictAlgorithm.replace);
     notifyListeners();
   }
   Future<List<Exercise>> getCustomExercises() async {
     final db = await database;
-    final res = await db.query('custom_exercises');
+    final res = await db.query('custom_exercises', where: 'deleted_at IS NULL');
     return res.map((e) {
       List<String> eq = [];
       if (e['equipment_json'] != null) { try { eq = List<String>.from(jsonDecode(e['equipment_json'] as String)); } catch (_) {} } 
@@ -407,40 +453,101 @@ class DatabaseService extends ChangeNotifier {
   Future<void> savePlan(WorkoutPlan plan) async {
     final db = await database;
     final now = DateTime.now().toIso8601String();
-    await db.insert('workout_plans', {'id': plan.id, 'name': plan.name, 'goal': plan.goal, 'type': plan.type, 'schedule_json': jsonEncode(plan.days.map((d) => d.toMap()).toList()), 'last_updated': now}, conflictAlgorithm: ConflictAlgorithm.replace);
+    await db.insert('workout_plans', {
+      'id': plan.id, 'name': plan.name, 'goal': plan.goal, 'type': plan.type, 
+      'schedule_json': jsonEncode(plan.days.map((d) => d.toMap()).toList()), 
+      'last_updated': now, 'synced': 0
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
     notifyListeners();
   }
-  Future<List<WorkoutPlan>> getPlans() async { final db = await database; final res = await db.query('workout_plans'); return res.map((e) => WorkoutPlan.fromMap(e)).toList(); }
-  Future<void> deletePlan(String id) async { final db = await database; await db.delete('workout_plans', where: 'id = ?', whereArgs: [id]); notifyListeners(); }
-  Future<List<WorkoutPlan>> searchPlans(String q) async { final db = await database; final res = await db.query('workout_plans', where: 'name LIKE ?', whereArgs: ['%$q%']); return res.map((e) => WorkoutPlan.fromMap(e)).toList(); }
+  Future<List<WorkoutPlan>> getPlans() async { 
+    final db = await database; 
+    final res = await db.query('workout_plans', where: 'deleted_at IS NULL'); 
+    return res.map((e) => WorkoutPlan.fromMap(e)).toList(); 
+  }
+  Future<void> deletePlan(String id) async { 
+    final db = await database; 
+    await db.update('workout_plans', {
+      'deleted_at': DateTime.now().toIso8601String(),
+      'synced': 0
+    }, where: 'id = ?', whereArgs: [id]); 
+    notifyListeners(); 
+  }
+  Future<List<WorkoutPlan>> searchPlans(String q) async { 
+    final db = await database; 
+    final res = await db.query('workout_plans', 
+      where: 'name LIKE ? AND deleted_at IS NULL', 
+      whereArgs: ['%$q%']); 
+    return res.map((e) => WorkoutPlan.fromMap(e)).toList(); 
+  }
   Future<List<Map<String, dynamic>>> getAllPlansRaw() async { final db = await database; return await db.query('workout_plans'); }
   Future<void> bulkInsertPlans(List<Map<String, dynamic>> p) async { final db = await database; final batch = db.batch(); for (var x in p) { batch.insert('workout_plans', x, conflictAlgorithm: ConflictAlgorithm.replace); } await batch.commit(noResult: true); notifyListeners(); }
 
   // Logs
   Future<void> startSession(WorkoutSession s) async { final db = await database; await db.insert('workout_sessions', {'id': s.id, 'plan_id': s.planId, 'day_name': s.dayName, 'start_time': s.startTime.toIso8601String()}); notifyListeners(); }
   Future<void> endSession(String id, DateTime end) async { final db = await database; await db.update('workout_sessions', {'end_time': end.toIso8601String()}, where: 'id = ?', whereArgs: [id]); notifyListeners(); }
-  Future<void> logSet(LogEntry log) async {
+  Future<bool> logSet(LogEntry log) async {
     final db = await database;
     final now = DateTime.now().toIso8601String();
-    await db.insert('workout_logs', {'id': log.id, 'session_id': log.sessionId, 'exercise_id': log.exerciseId, 'exercise_name': log.exerciseName, 'weight': log.weight, 'reps': log.reps, 'volume_load': log.volumeLoad, 'duration': log.duration, 'timestamp': log.timestamp, 'last_updated': now}, conflictAlgorithm: ConflictAlgorithm.replace);
+    await db.insert('workout_logs', {
+      'id': log.id, 'session_id': log.sessionId, 'exercise_id': log.exerciseId, 
+      'exercise_name': log.exerciseName, 'weight': log.weight, 'reps': log.reps, 
+      'volume_load': log.volumeLoad, 'duration': log.duration, 'timestamp': log.timestamp, 
+      'last_updated': now, 'synced': 0, 'deleted_at': null, 'rpe': log.rpe
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
     final max = log.weight * (1 + (log.reps / 30));
-    await _checkAndUpdateOneRepMax(log.exerciseName, max);
+    final isPr = await _checkAndUpdateOneRepMax(log.exerciseName, max);
     notifyListeners();
+    return isPr;
   }
   Future<List<WorkoutSession>> getSessionsForPlanDay(String p, String d) async { final db = await database; final res = await db.query('workout_sessions', where: 'plan_id = ? AND day_name = ?', whereArgs: [p, d], orderBy: 'start_time DESC'); return res.map((e) => WorkoutSession(id: e['id'] as String, planId: e['plan_id'] as String, dayName: e['day_name'] as String, startTime: DateTime.parse(e['start_time'] as String), endTime: e['end_time'] != null ? DateTime.parse(e['end_time'] as String) : null)).toList(); }
   Future<List<LogEntry>> getLogsForSession(String s) async { final db = await database; final res = await db.query('workout_logs', where: 'session_id = ?', whereArgs: [s]); return res.map((e) => LogEntry.fromMap(e)).toList(); }
   Future<LogEntry?> getLastLogForExercise(String n) async { final db = await database; final res = await db.query('workout_logs', where: 'exercise_name = ?', whereArgs: [n], orderBy: 'timestamp DESC', limit: 1); return res.isEmpty ? null : LogEntry.fromMap(res.first); }
-  Future<List<LogEntry>> getHistory() async { final db = await database; final res = await db.query('workout_logs', orderBy: 'timestamp DESC', limit: 50); return res.map((e) => LogEntry.fromMap(e)).toList(); }
-  Future<List<LogEntry>> getHistoryForExercise(String n) async { final db = await database; final res = await db.query('workout_logs', where: 'exercise_name = ?', whereArgs: [n], orderBy: 'timestamp DESC'); return res.map((e) => LogEntry.fromMap(e)).toList(); }
-  Future<List<LogEntry>> searchHistory(String q) async { final db = await database; final res = await db.query('workout_logs', where: 'exercise_name LIKE ?', whereArgs: ['%$q%'], orderBy: 'timestamp DESC'); Set<String> seen = {}; List<LogEntry> uniq = []; for (var row in res) { var log = LogEntry.fromMap(row); if (!seen.contains(log.exerciseName)) { seen.add(log.exerciseName); uniq.add(log); }} return uniq; }
-  Future<List<LogEntry>> getLogsInDateRange(DateTime s, DateTime e) async { final db = await database; final res = await db.query('workout_logs', where: 'timestamp BETWEEN ? AND ?', whereArgs: [s.toIso8601String(), e.toIso8601String()]); return res.map((e) => LogEntry.fromMap(e)).toList(); }
+  Future<List<LogEntry>> getHistory() async { 
+    final db = await database; 
+    final res = await db.query('workout_logs', 
+      where: 'deleted_at IS NULL',
+      orderBy: 'timestamp DESC', 
+      limit: 50); 
+    return res.map((e) => LogEntry.fromMap(e)).toList(); 
+  }
+  Future<List<LogEntry>> getHistoryForExercise(String n) async { 
+    final db = await database; 
+    final res = await db.query('workout_logs', 
+      where: 'exercise_name = ? AND deleted_at IS NULL', 
+      whereArgs: [n], 
+      orderBy: 'timestamp DESC'); 
+    return res.map((e) => LogEntry.fromMap(e)).toList(); 
+  }
+  Future<List<LogEntry>> searchHistory(String q) async { 
+    final db = await database; 
+    final res = await db.query('workout_logs', 
+      where: 'exercise_name LIKE ? AND deleted_at IS NULL', 
+      whereArgs: ['%$q%'], 
+      orderBy: 'timestamp DESC'); 
+    Set<String> seen = {}; List<LogEntry> uniq = []; for (var row in res) { var log = LogEntry.fromMap(row); if (!seen.contains(log.exerciseName)) { seen.add(log.exerciseName); uniq.add(log); }} return uniq; 
+  }
+  Future<List<LogEntry>> getLogsInDateRange(DateTime s, DateTime e) async { 
+    final db = await database; 
+    final res = await db.query('workout_logs', 
+      where: 'timestamp BETWEEN ? AND ? AND deleted_at IS NULL', 
+      whereArgs: [s.toIso8601String(), e.toIso8601String()]); 
+    return res.map((e) => LogEntry.fromMap(e)).toList(); 
+  }
   Future<List<Map<String, dynamic>>> getWeeklyVolume() async { final db = await database; return await db.rawQuery("SELECT strftime('%W', timestamp) as week, SUM(volume_load) as total_volume FROM workout_logs GROUP BY week ORDER BY week ASC LIMIT 12"); }
   Future<List<Map<String, dynamic>>> getMostFrequentExercises() async { final db = await database; return await db.rawQuery("SELECT exercise_name, COUNT(*) as count FROM workout_logs GROUP BY exercise_name ORDER BY count DESC LIMIT 20"); }
   Future<List<Map<String, dynamic>>> getAllLogsRaw() async { final db = await database; return await db.query('workout_logs'); }
   Future<void> bulkInsertLogs(List<Map<String, dynamic>> l) async { final db = await database; final batch = db.batch(); for (var x in l) { batch.insert('workout_logs', x, conflictAlgorithm: ConflictAlgorithm.replace); } await batch.commit(noResult: true); notifyListeners(); }
 
   // Stats
-  Future<void> _checkAndUpdateOneRepMax(String n, double w) async { final cur = await getLatestOneRepMaxDetailed(n); if (cur == null || w > (cur['weight'] as double)) await addOneRepMax(n, w); }
+  Future<bool> _checkAndUpdateOneRepMax(String n, double w) async { 
+    final cur = await getLatestOneRepMaxDetailed(n); 
+    if (cur == null || w > (cur['weight'] as double)) {
+       await addOneRepMax(n, w); 
+       return true;
+    }
+    return false;
+  }
   Future<void> addOneRepMax(String n, double w) async { final db = await database; final now = DateTime.now().toIso8601String(); await db.insert('exercise_stats', {'exercise_name': n, 'one_rep_max': w, 'last_updated': now}, conflictAlgorithm: ConflictAlgorithm.replace); await db.insert('one_rep_max_history', {'id': const Uuid().v4(), 'exercise_name': n, 'weight': w, 'date': now}); notifyListeners(); }
   Future<Map<String, double>> getLatestOneRepMaxes() async { final db = await database; final res = await db.query('exercise_stats'); Map<String, double> m = {}; for (var r in res) { m[r['exercise_name'] as String] = r['one_rep_max'] as double; } return m; }
   Future<Map<String, dynamic>?> getLatestOneRepMaxDetailed(String n) async { final db = await database; final res = await db.query('one_rep_max_history', where: 'exercise_name = ?', whereArgs: [n], orderBy: 'date DESC', limit: 1); return res.isNotEmpty ? {'weight': res.first['weight'], 'date': res.first['date']} : null; }
