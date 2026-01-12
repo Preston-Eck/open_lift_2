@@ -53,6 +53,7 @@ web/icons/Icon-512.png
 
 # Application Specific
 **/exercises/
-scripts/
+scripts/*
+!scripts/netlify-build.sh
 .env
 app.env
