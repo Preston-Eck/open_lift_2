@@ -37,7 +37,7 @@ class RealtimeService extends ChangeNotifier {
 
     if (myId == null) return;
 
-    _versusChannel!.sendBroadcast(
+    _versusChannel!.sendBroadcastMessage(
       event: 'tonnage_update',
       payload: {
         'user_id': myId,

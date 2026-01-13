@@ -473,7 +473,7 @@ class _ComplexEquipmentEditorState extends State<ComplexEquipmentEditor> {
       final db = context.read<DatabaseService>();
       for (var e in exes) {
          final newEx = Exercise(
-           id: const Uuid().v4(),
+           id: Uuid().v4(),
            name: e['name'],
            category: e['category'],
            primaryMuscles: List<String>.from(e['primary_muscles'] ?? []),

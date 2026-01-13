@@ -115,7 +115,7 @@ class WorkoutPlayerService extends ChangeNotifier {
     _nextRestAdjust = seconds;
   }
 
-  void skipRest() {
+  void _finishRest() {
     _timer?.cancel();
     _currentSetIndex++;
     _startCountdown();
@@ -150,4 +150,3 @@ class WorkoutPlayerService extends ChangeNotifier {
     super.dispose();
   }
 }
-

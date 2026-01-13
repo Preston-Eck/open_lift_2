@@ -185,7 +185,7 @@ class SocialService {
     final response = await _supabase
         .from('logs')
         .select('*, profiles:owner_id(username, avatar_url)')
-        .in_('owner_id', friendIds)
+        .inFilter('owner_id', friendIds)
         .order('timestamp', ascending: false)
         .limit(50);
         
@@ -233,9 +233,10 @@ class SocialService {
   Future<int> getLikeCount(String logId) async {
      final response = await _supabase
         .from('workout_likes')
-        .select('id', const FetchOptions(count: CountOption.exact))
-        .eq('log_id', logId);
-     return response.length;
+        .select()
+        .eq('log_id', logId)
+        .count();
+     return response.count;
   }
 
   // Helper

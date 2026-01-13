@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
 import 'package:supabase_flutter/supabase_flutter.dart'; 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import '../services/database_service.dart';
 import '../services/logger_service.dart';
+import '../services/gemini_service.dart';
 import '../services/workout_player_service.dart'; 
 import '../services/realtime_service.dart'; // NEW
 import '../models/log.dart';
@@ -460,8 +462,7 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
                      value: _autoApplySmartRest, 
                      onChanged: (v) => setState(() => _autoApplySmartRest = v),
                      activeColor: Colors.orange,
-                     visualDensity: VisualDensity.compact,
-                   ),
+                     ),
                  ],
                ),
              ),
@@ -488,7 +489,6 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
           children: meta.primaryMuscles.map((m) => Chip(
             label: Text(m, style: const TextStyle(fontSize: 10, color: Colors.white)),
             backgroundColor: Colors.blueGrey.shade800,
-            visualDensity: VisualDensity.compact,
             padding: EdgeInsets.zero,
           )).toList(),
         ),
@@ -536,7 +536,7 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
         children: [
           if (player.state == WorkoutState.resting)
             ElevatedButton(
-              onPressed: () => player.finishRest(),
+              onPressed: () => player.skipRest(),
               style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
               child: const Text("SKIP REST"),
             ),
@@ -689,11 +689,11 @@ class _ExerciseCardState extends State<ExerciseCard> {
   }
 
   Future<void> _showDetails(String name) async {
-    final connectivity = await Connectivity().checkConnectivity();
+    final connectivityResult = await Connectivity().checkConnectivity();
     
     if (!mounted) return;
 
-    if (connectivity == ConnectivityResult.none) {
+    if (connectivityResult.contains(ConnectivityResult.none)) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Offline.")));
       return;
     }
