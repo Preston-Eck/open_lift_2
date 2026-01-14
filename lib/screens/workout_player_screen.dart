@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
-import 'package:supabase_flutter/supabase_flutter.dart'; 
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import '../services/database_service.dart';
 import '../services/logger_service.dart';
@@ -58,7 +58,7 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
   @override
   void initState() {
     super.initState();
-    _sessionId = widget.resumeSessionId ?? const Uuid().v4(); 
+    _sessionId = widget.resumeSessionId ?? Uuid().v4(); 
     _currentStepIndex = widget.initialStepIndex;
     if (widget.resumeSessionId == null) _initSession();
     _loadData();
@@ -109,7 +109,7 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
     final setTonnage = weight * reps;
 
     final log = LogEntry(
-      id: const Uuid().v4(),
+      id: Uuid().v4(),
       exerciseId: ex.name,
       exerciseName: ex.name,
       weight: weight,
@@ -928,11 +928,15 @@ class _ExerciseCardState extends State<ExerciseCard> {
   }
 
   Future<void> _showDetails(String name) async {
-    final connectivityResult = await Connectivity().checkConnectivity();
+    final dynamic connectivityResult = await Connectivity().checkConnectivity();
     
     if (!mounted) return;
 
-    if (connectivityResult == ConnectivityResult.none) {
+    final bool isOffline = connectivityResult is List 
+      ? connectivityResult.contains(ConnectivityResult.none)
+      : connectivityResult == ConnectivityResult.none;
+
+    if (isOffline) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Offline.")));
       return;
     }

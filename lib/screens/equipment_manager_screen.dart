@@ -357,8 +357,7 @@ class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> with Si
                       overflow: TextOverflow.ellipsis
                     ),
                     value: isEnabled,
-                    // FIXED: Replaced deprecated activeColor
-                    activeTrackColor: AppTheme.renewalTeal,
+                    activeColor: AppTheme.renewalTeal,
                     onChanged: (val) => _toggleCustomItem(item['id'], val),
                     secondary: IconButton(
                       icon: const Icon(Icons.edit, size: 20, color: Colors.grey),
@@ -488,19 +487,18 @@ class _ComplexEquipmentEditorState extends State<ComplexEquipmentEditor> {
         // Convert suggested exercises to local Exercises and save them
         _specificExercises.addAll(exes.map((e) => e['name'].toString()));
       });
-
       // Auto-save new exercises to DB
       final db = context.read<DatabaseService>();
       for (var e in exes) {
          final newEx = Exercise(
-           id: Uuid().v4(),
-           name: e['name'],
-           category: e['category'],
-           primaryMuscles: List<String>.from(e['primary_muscles'] ?? []),
-           secondaryMuscles: [],
-           equipment: [_nameController.text],
-           instructions: List<String>.from(e['instructions'] ?? []),
-           images: [],
+            id: Uuid().v4(),
+            name: e['name'],
+            category: e['category'],
+            primaryMuscles: List<String>.from(e['primary_muscles'] ?? []),
+            secondaryMuscles: [],
+            equipment: [_nameController.text],
+            instructions: List<String>.from(e['instructions'] ?? []),
+            images: [],
          );
          await db.addCustomExercise(newEx);
       }

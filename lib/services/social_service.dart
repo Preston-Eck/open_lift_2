@@ -273,9 +273,8 @@ class SocialService {
      final response = await _supabase
         .from('workout_likes')
         .select()
-        .eq('log_id', logId)
-        .count();
-     return response.count;
+        .eq('log_id', logId);
+     return response.length;
   }
 
   // Helper

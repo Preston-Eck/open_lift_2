@@ -3,9 +3,11 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
-import '../models/plan.dart';
-import '../models/exercise.dart'; // Import Exercise model
-import '../models/log.dart'; // Import LogEntry model
+import 'package:open_lift_2/models/plan.dart';
+import 'package:open_lift_2/models/exercise.dart'; // Import Exercise model
+import 'package:open_lift_2/models/log.dart'; // Import LogEntry model
+import 'package:open_lift_2/services/auth_service.dart';
+import 'package:open_lift_2/services/database_service.dart';
 
 class PlanGenerationResult {
   final WorkoutPlan plan;
@@ -390,7 +392,7 @@ class GeminiService {
   Future<String> generatePostWorkoutInsight(List<LogEntry> sessionLogs) async {
     if (sessionLogs.isEmpty) return "";
     
-    final logsJson = sessionLogs.map((l) => {
+    final logsJson = sessionLogs.map((LogEntry l) => {
       'exercise': l.exerciseName,
       'weight': l.weight,
       'reps': l.reps,

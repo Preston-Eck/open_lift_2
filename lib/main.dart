@@ -111,7 +111,7 @@ Future<void> main() async {
           // 4. Realtime depends on Auth
           ChangeNotifierProxyProvider<AuthService, RealtimeService>(
             create: (context) => RealtimeService(Provider.of<AuthService>(context, listen: false)),
-            update: (_, auth, realtime) => RealtimeService(auth),
+            update: (context, auth, realtime) => RealtimeService(auth),
           ),
 
           // 5. Workout Player (Global State)
