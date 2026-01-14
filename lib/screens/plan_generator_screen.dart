@@ -16,7 +16,32 @@ class _PlanGeneratorScreenState extends State<PlanGeneratorScreen> {
   final TextEditingController _goalController = TextEditingController();
   String _daysPerWeek = "3";
   bool _isLoading = false;
-  PlanGenerationResult? _generatedResult; // CHANGED
+  PlanGenerationResult? _generatedResult; 
+  
+  List<String> _availableEquipment = [];
+  Set<String> _selectedEquipment = {};
+  String? _currentGymName;
+  bool _isEquipmentLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadGymEquipment();
+  }
+
+  Future<void> _loadGymEquipment() async {
+    final db = context.read<DatabaseService>();
+    final equipment = await db.getActiveEquipment();
+    final gyms = await db.getGymProfiles();
+    final currentGym = gyms.firstWhere((g) => g.id == db.currentGymId, orElse: () => gyms.first);
+
+    setState(() {
+      _availableEquipment = equipment;
+      _selectedEquipment = Set.from(equipment);
+      _currentGymName = currentGym.name;
+      _isEquipmentLoading = false;
+    });
+  }
 
   Future<void> _generatePlan() async {
     setState(() {
@@ -28,17 +53,17 @@ class _PlanGeneratorScreenState extends State<PlanGeneratorScreen> {
     final gemini = context.read<GeminiService>();
     
     try {
-      // 1. Fetch Local Data (Equipment)
-      final equipment = await db.getOwnedEquipment();
-      if (equipment.isEmpty) {
+      // 1. Use Selected Equipment
+      if (_selectedEquipment.isEmpty) {
         if (mounted) {
            ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("You need equipment to generate a plan! Go to Manage Equipment."))
+            const SnackBar(content: Text("Please select at least one piece of equipment!"))
           );
         }
         setState(() => _isLoading = false);
         return;
       }
+      final equipment = _selectedEquipment.toList();
 
       // 2. Fetch User Profile (Database)
       final profileData = await db.getUserProfile();
@@ -152,6 +177,49 @@ class _PlanGeneratorScreenState extends State<PlanGeneratorScreen> {
               decoration: const InputDecoration(border: OutlineInputBorder(), hintText: "60"),
             ),
             const SizedBox(height: 20),
+
+            if (!_isEquipmentLoading) ...[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text("Equipment at $_currentGymName", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  TextButton(
+                    onPressed: () => setState(() {
+                      if (_selectedEquipment.length == _availableEquipment.length) {
+                        _selectedEquipment.clear();
+                      } else {
+                        _selectedEquipment = Set.from(_availableEquipment);
+                      }
+                    }),
+                    child: Text(_selectedEquipment.length == _availableEquipment.length ? "Deselect All" : "Select All"),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              _availableEquipment.isEmpty 
+                ? const Text("No equipment found for this gym profile.", style: TextStyle(color: Colors.red))
+                : Wrap(
+                    spacing: 8,
+                    children: _availableEquipment.map((item) {
+                      final isSelected = _selectedEquipment.contains(item);
+                      return FilterChip(
+                        label: Text(item),
+                        selected: isSelected,
+                        onSelected: (val) {
+                          setState(() {
+                            if (val) {
+                              _selectedEquipment.add(item);
+                            } else {
+                              _selectedEquipment.remove(item);
+                            }
+                          });
+                        },
+                      );
+                    }).toList(),
+                  ),
+              const SizedBox(height: 20),
+            ] else 
+              const Center(child: CircularProgressIndicator()),
 
             SizedBox(
               width: double.infinity,

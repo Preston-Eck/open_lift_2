@@ -93,6 +93,9 @@ class WorkoutPlayerService extends ChangeNotifier {
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_state == WorkoutState.countdown) {
         if (_timerSeconds > 0) {
+          if (_timerSeconds == 3) {
+            _speak("Get ready");
+          }
           _playBeep();
           _timerSeconds--;
         } else {
@@ -102,6 +105,7 @@ class WorkoutPlayerService extends ChangeNotifier {
         _timerSeconds++;
       } else if (_state == WorkoutState.resting) {
         if (_timerSeconds > 0) {
+          // Final 3 seconds of rest get a beep
           if (_timerSeconds <= 3) _playBeep();
           
           if (_ttsEnabled && _timerSeconds == 5) {

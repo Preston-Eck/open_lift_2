@@ -50,10 +50,9 @@ class DatabaseService extends ChangeNotifier {
       final dbPath = await getDatabasesPath();
       path = join(dbPath, fileName);
     }
-
         return await openDatabase(
           path,
-          version: 22,
+          version: 23,
           onCreate: (db, version) async {
             await _createTables(db);
             await _createProfileTable(db);
@@ -176,6 +175,12 @@ class DatabaseService extends ChangeNotifier {
            debugPrint("⚡ Migrating to v22: Goal Setting...");
            try {
              await db.execute('ALTER TABLE exercise_stats ADD COLUMN target_weight REAL');
+           } catch (_) {}
+        }
+        if (oldVersion < 23) {
+           debugPrint("⚡ Migrating to v23: RPE Column Fix...");
+           try {
+             await db.execute('ALTER TABLE workout_logs ADD COLUMN rpe REAL');
            } catch (_) {}
         }
       }

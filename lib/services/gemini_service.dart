@@ -6,8 +6,6 @@ import 'package:uuid/uuid.dart';
 import 'package:open_lift_2/models/plan.dart';
 import 'package:open_lift_2/models/exercise.dart'; // Import Exercise model
 import 'package:open_lift_2/models/log.dart'; // Import LogEntry model
-import 'package:open_lift_2/services/auth_service.dart';
-import 'package:open_lift_2/services/database_service.dart';
 
 class PlanGenerationResult {
   final WorkoutPlan plan;
@@ -59,10 +57,16 @@ class GeminiService {
       1. **VALIDATION:** ONLY program exercises if the user has the required tool.
       2. **EXISTING EXERCISES:** Prefer using exercises from this list: ${validExercises.take(100).join(', ')}... (and others you know are standard).
       3. **NEW EXERCISES:** If you need an exercise NOT commonly known or specific to a machine, you MUST define it in `definitions`.
-      4. **HEALTHY ROUTINE:** 
-         - Include Warm-up (Mobility) and Cool-down.
+      4. **COMPLETENESS:** 
+         - EVERY session MUST include a "Warm-up" block (5-10 mins mobility/prep).
+         - EVERY session MUST include a "Cool-down" block (5 mins stretching).
+      5. **SPECIFICITY (CRITICAL):**
+         - Avoid vague names like "[Machine Name] HIIT". 
+         - Instead, be specific about the action: e.g., "Assault Bike Intervals", "Incline Stairway Sprints", "Kettlebell Swing Finisher".
+      6. **HEALTHY ROUTINE:** 
          - Balance Push/Pull/Legs or Upper/Lower to prevent injury.
          - Ensure appropriate volume (sets/reps) for the goal.
+         - HIIT is practical on bikes, rowers, or with bodyweight/kettlebells; ensure the chosen exercise matches the available equipment.
 
       === OUTPUT STRUCTURE ===
       Return a SINGLE JSON Object:
@@ -81,13 +85,15 @@ class GeminiService {
           {
             "day_name": "Day 1 - Upper Power",
             "exercises": [
+              { "name": "Dynamic Chest Stretch", "sets": 1, "reps": "10", "rest": 0, "notes": "Warm-up" },
               {
                 "name": "Face Pull",
                 "sets": 3,
                 "reps": "12-15",
                 "rest": 60,
-                "notes": "Warm-up"
-              }
+                "notes": "Focus on control"
+              },
+              { "name": "Static Pec Stretch", "sets": 1, "reps": "30s", "rest": 0, "notes": "Cool-down" }
             ]
           }
         ]
