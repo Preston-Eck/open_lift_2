@@ -19,7 +19,7 @@ import 'services/realtime_service.dart';
 import 'services/workout_player_service.dart'; 
 import 'services/notification_service.dart'; // NEW
 import 'theme.dart';
-import 'screens/home_screen.dart'; 
+// import 'screens/home_screen.dart'; 
 import 'screens/splash_screen.dart'; // NEW
 
 Future<void> main() async {

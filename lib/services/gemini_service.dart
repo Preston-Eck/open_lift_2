@@ -104,8 +104,7 @@ class GeminiService {
       final content = [Content.text(prompt)];
       final response = await _model.generateContent(content);
       final String rawJson = response.text ?? "{}";
-      
-      final cleanJson = rawJson.replaceAll('```json', '').replaceAll('```', '').trim();
+      final cleanJson = _extractJson(rawJson);
       final Map<String, dynamic> data = jsonDecode(cleanJson);
 
       // 1. Parse Definitions (New Exercises)
@@ -176,7 +175,7 @@ class GeminiService {
       final response = await _model.generateContent(content);
       
       final String rawJson = response.text ?? "[]";
-      final cleanJson = rawJson.replaceAll('```json', '').replaceAll('```', '').trim();
+      final cleanJson = _extractJson(rawJson);
       
       final List<dynamic> parsed = jsonDecode(cleanJson);
       return parsed.map((e) => e.toString()).toList();
@@ -229,7 +228,7 @@ class GeminiService {
 
       final response = await _model.generateContent(content);
       final String rawJson = response.text ?? "{}";
-      final cleanJson = rawJson.replaceAll('```json', '').replaceAll('```', '').trim();
+      final cleanJson = _extractJson(rawJson);
       
       return jsonDecode(cleanJson);
     } catch (e) {
@@ -271,7 +270,7 @@ class GeminiService {
       final response = await _model.generateContent(content);
       
       final String rawJson = response.text ?? "[]";
-      final cleanJson = rawJson.replaceAll('```json', '').replaceAll('```', '').trim();
+      final cleanJson = _extractJson(rawJson);
       
       final List<dynamic> parsed = jsonDecode(cleanJson);
       return List<Map<String, dynamic>>.from(parsed);
@@ -379,7 +378,7 @@ class GeminiService {
       final response = await _model.generateContent(content);
       
       final String rawJson = response.text ?? "{}";
-      final cleanJson = rawJson.replaceAll('```json', '').replaceAll('```', '').trim();
+      final cleanJson = _extractJson(rawJson);
       
       return jsonDecode(cleanJson);
     } catch (e) {
@@ -425,5 +424,18 @@ class GeminiService {
       debugPrint("Post-Workout Insight Error: $e");
       return "";
     }
+  }
+
+  String _extractJson(String text) {
+    if (text.contains('```json')) {
+      final start = text.indexOf('```json') + 7;
+      final end = text.lastIndexOf('```');
+      return text.substring(start, end).trim();
+    } else if (text.contains('```')) {
+      final start = text.indexOf('```') + 3;
+      final end = text.lastIndexOf('```');
+      return text.substring(start, end).trim();
+    }
+    return text.trim();
   }
 }

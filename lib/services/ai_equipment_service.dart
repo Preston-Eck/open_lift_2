@@ -1,15 +1,21 @@
 import 'dart:convert';
-import 'dart:typed_data';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-
-import 'package:http/http.dart' as http;
+import 'package:google_generative_ai/google_generative_ai.dart';
 import '../models/attachment.dart';
 
 class AiEquipmentService {
   List<String> _knownExerciseNames = [];
+  late final GenerativeModel _model;
 
-  AiEquipmentService();
+  AiEquipmentService() {
+    final apiKey = dotenv.env['GEMINI_API_KEY'] ?? "";
+    _model = GenerativeModel(
+      model: 'gemini-2.0-flash-exp',
+      apiKey: apiKey,
+    );
+  }
 
   Future<void> loadExerciseLibrary() async {
     if (_knownExerciseNames.isNotEmpty) return;
@@ -18,7 +24,7 @@ class AiEquipmentService {
       final List<dynamic> data = json.decode(response);
       _knownExerciseNames = data.map((e) => e['name'].toString()).toList();
     } catch (e) {
-      print("Error loading exercise library: $e");
+      debugPrint("Error loading exercise library: $e");
     }
   }
 
@@ -30,16 +36,10 @@ class AiEquipmentService {
   }) async {
     await loadExerciseLibrary();
     
-    final apiKey = dotenv.env['GEMINI_API_KEY'] ?? "";
-    if (apiKey.isEmpty) {
-      print("Error: Missing GEMINI_API_KEY");
+    if (dotenv.env['GEMINI_API_KEY'] == null) {
+      debugPrint("Error: Missing GEMINI_API_KEY");
       return [];
     }
-
-    // Direct HTTP Call to Gemini 2.5 Flash
-    // Verified available via API listing
-    const modelId = 'gemini-2.5-flash';
-    final url = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/$modelId:generateContent?key=$apiKey');
 
     final promptText = '''
     You are an expert fitness equipment analyst. 
@@ -72,66 +72,52 @@ class AiEquipmentService {
     ${_knownExerciseNames.join(", ")}
     ''';
 
-    // Build Request Body
-    List<Map<String, dynamic>> parts = [
-      {"text": promptText}
+    final List<Content> content = [
+      Content.multi([
+        TextPart(promptText),
+        if (attachments != null)
+          ...attachments.map((file) {
+            final bytes = file.bytes;
+            final mime = file.mimeType ?? 'image/jpeg';
+            if (bytes != null) {
+              return DataPart(mime, bytes);
+            }
+            return TextPart("");
+          }).where((part) {
+            if (part is DataPart) return true;
+            if (part is TextPart) return part.text.isNotEmpty;
+            return false;
+          }),
+      ])
     ];
 
-    if (attachments != null) {
-      for (var file in attachments) {
-        try {
-           final bytes = file.bytes;
-           final mime = file.mimeType ?? 'image/jpeg';
-           
-           if (bytes != null) {
-              final base64Image = base64Encode(bytes);
-              parts.add({
-                "inline_data": {
-                  "mime_type": mime,
-                  "data": base64Image
-                }
-              });
-           }
-        } catch (e) {
-          print("Error reading attachment: $e");
-        }
-      }
-    }
-
     try {
-      final response = await http.post(
-        url,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          "contents": [{ "parts": parts }]
-        }),
-      );
-
-      if (response.statusCode != 200) {
-        print("Gemini API Error (${response.statusCode}): ${response.body}");
-        return [];
-      }
-
-      final jsonResponse = jsonDecode(response.body);
-      // Simplify accessing the candidates -> content -> parts -> text
-      final candidates = jsonResponse['candidates'] as List<dynamic>?;
-      if (candidates == null || candidates.isEmpty) return [];
-      
-      final contentParts = candidates[0]['content']['parts'] as List<dynamic>?;
-      if (contentParts == null || contentParts.isEmpty) return [];
-      
-      final text = contentParts[0]['text'] as String?;
+      final response = await _model.generateContent(content);
+      final text = response.text;
       if (text == null) return [];
 
-      // Extract JSON from markdown
-      final cleanJson = text.replaceAll('```json', '').replaceAll('```', '').trim();
-      final List<dynamic> parsed = json.decode(cleanJson);
+      // Extract JSON from markdown or raw text
+      final jsonString = _extractJson(text);
+      final List<dynamic> parsed = json.decode(jsonString);
       
       return parsed.map((e) => e.toString()).toList();
 
     } catch (e) {
-      print("AI Analysis Failed (HTTP): $e");
+      debugPrint("AI Analysis Failed: $e");
       return [];
     }
+  }
+
+  String _extractJson(String text) {
+    if (text.contains('```json')) {
+      final start = text.indexOf('```json') + 7;
+      final end = text.lastIndexOf('```');
+      return text.substring(start, end).trim();
+    } else if (text.contains('```')) {
+      final start = text.indexOf('```') + 3;
+      final end = text.lastIndexOf('```');
+      return text.substring(start, end).trim();
+    }
+    return text.trim();
   }
 }

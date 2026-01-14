@@ -342,10 +342,12 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
         if (meta != null) _exerciseMetadata[ex.name] = meta;
       }
     }
-    if (mounted) setState(() { 
-      _aliases = aliases; 
-      _oneRepMaxes = maxes;
-    });
+    if (mounted) {
+      setState(() { 
+        _aliases = aliases; 
+        _oneRepMaxes = maxes;
+      });
+    }
   }
 
   Future<void> _finishWorkout() async {
@@ -423,8 +425,7 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
   @override
   Widget build(BuildContext context) {
     final player = context.watch<WorkoutPlayerService>();
-    final isResting = player.state == WorkoutState.resting;
-    final isCountdown = player.state == WorkoutState.countdown;
+    // Variables removed because they are unused according to lint
 
     return Scaffold(
       backgroundColor: Colors.black, // Focused dark mode for player

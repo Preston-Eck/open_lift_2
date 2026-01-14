@@ -40,6 +40,11 @@ class ExportService {
     await _shareFile(jsonString, "openlift_logs.json", "application/json");
   }
 
+  /// Combined export for backup
+  Future<void> exportAllData() async {
+    await exportToJSON();
+  }
+
   Future<void> _shareFile(String content, String fileName, String mimeType) async {
     if (kIsWeb) {
       // For Web, we use a simple anchor element trick (not ideal in a service but common in Flutter Web)

@@ -37,6 +37,7 @@ class RealtimeService extends ChangeNotifier {
 
     if (myId == null) return;
 
+    // ignore: invalid_use_of_internal_member
     _versusChannel!.send(
       type: 'broadcast' as dynamic,
       event: 'tonnage_update',

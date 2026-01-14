@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
 import 'auth_service.dart';
 
 class SocialService {
@@ -79,7 +80,7 @@ class SocialService {
     
     final response = await _supabase
         .from('friendships')
-        .select('*, profiles:requester_id(username, avatar_url)') // Join to get sender details
+        .select('*, requester:profiles!requester_id(username, avatar_url)')
         .eq('receiver_id', myId)
         .eq('status', 'pending');
         
@@ -95,8 +96,8 @@ class SocialService {
         .from('friendships')
         .select('''
           *,
-          requester:requester_id(id, username, avatar_url, last_seen),
-          receiver:receiver_id(id, username, avatar_url, last_seen)
+          requester:profiles!requester_id(id, username, avatar_url, last_seen),
+          receiver:profiles!receiver_id(id, username, avatar_url, last_seen)
         ''')
         .or('requester_id.eq.$myId,receiver_id.eq.$myId')
         .eq('status', 'accepted');
@@ -154,7 +155,7 @@ class SocialService {
 
     // 1. Create Pending Member Entry
     await _supabase.from('gym_members').insert({
-      'id': _uuid(),
+      'id': const Uuid().v4(),
       'gym_id': gymId,
       'user_id': friendId,
       'nickname': 'Pending Member',
@@ -236,7 +237,7 @@ class SocialService {
   Future<List<Map<String, dynamic>>> getComments(String logId) async {
     final response = await _supabase
         .from('workout_comments')
-        .select('*, profiles:user_id(username, avatar_url)')
+        .select('*, profiles!user_id(username, avatar_url)')
         .eq('log_id', logId)
         .order('created_at', ascending: true);
     return List<Map<String, dynamic>>.from(response);
@@ -274,11 +275,8 @@ class SocialService {
         .from('workout_likes')
         .select()
         .eq('log_id', logId);
-     return response.length;
+     return (response as List).length;
   }
 
-  // Helper
-  String _uuid() {
-    return DateTime.now().millisecondsSinceEpoch.toString(); // Simple ID for now
-  }
+  // Helper removed as we now use Uuid package
 }

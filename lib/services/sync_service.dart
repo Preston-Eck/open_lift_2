@@ -22,6 +22,11 @@ class SyncService extends ChangeNotifier {
 
   /// Main Sync Method.
   Future<void> syncAll() async {
+    if (_isSyncing) {
+      debugPrint("Sync already in progress. Skipping.");
+      return;
+    }
+
     if (!_auth.isAuthenticated) {
       debugPrint("Sync Aborted: User not logged in.");
       return;

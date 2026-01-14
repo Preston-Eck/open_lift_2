@@ -113,9 +113,11 @@ class _PlanGeneratorScreenState extends State<PlanGeneratorScreen> {
         validExercises, 
       );
       
-      setState(() {
-        _generatedResult = result;
-      });
+      if (mounted) {
+        setState(() {
+          _generatedResult = result;
+        });
+      }
 
     } catch (e) {
       if (mounted) {
