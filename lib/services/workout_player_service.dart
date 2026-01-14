@@ -8,6 +8,29 @@ enum WorkoutState { idle, countdown, working, resting, finished }
 class WorkoutPlayerService extends ChangeNotifier {
   final AudioPlayer _audioPlayer = AudioPlayer();
   
+  WorkoutPlayerService() {
+    _initAudioSession();
+  }
+
+  void _initAudioSession() {
+    AudioPlayer.global.setAudioContext(AudioContext(
+      android: const AudioContextAndroid(
+        isSpeakerphoneOn: true,
+        stayAwake: true,
+        contentType: AndroidContentType.sonification,
+        usageType: AndroidUsageType.assistanceSonification,
+        audioFocus: AndroidAudioFocus.gainTransientMayDuck,
+      ),
+      iOS: const AudioContextIOS(
+        category: AVAudioSessionCategory.ambient,
+        options: [
+          AVAudioSessionOptions.mixWithOthers,
+          AVAudioSessionOptions.duckOthers,
+        ],
+      ),
+    ));
+  }
+  
   WorkoutState _state = WorkoutState.idle;
   int _timerSeconds = 0;
   Timer? _timer;

@@ -27,9 +27,15 @@ class SyncService extends ChangeNotifier {
       return;
     }
 
-    final connectivity = await Connectivity().checkConnectivity();
-    if (connectivity == ConnectivityResult.none) {
-      debugPrint("Sync Aborted: No Internet.");
+    final dynamic connectivity = await Connectivity().checkConnectivity();
+    final bool isOffline = connectivity is List 
+      ? connectivity.contains(ConnectivityResult.none)
+      : connectivity == ConnectivityResult.none;
+
+    if (isOffline) {
+      _lastError = "Sync Aborted: No Internet.";
+      debugPrint(_lastError);
+      notifyListeners();
       return;
     }
 

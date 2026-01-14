@@ -8,7 +8,8 @@ import '../services/database_service.dart';
 import '../services/logger_service.dart';
 import '../services/gemini_service.dart';
 import '../services/workout_player_service.dart'; 
-import '../services/realtime_service.dart'; // NEW
+import '../services/realtime_service.dart';
+import '../services/sync_service.dart'; // NEW
 import '../models/log.dart';
 import '../models/plan.dart';
 import '../models/exercise.dart';
@@ -282,6 +283,7 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
   Future<void> _finishWorkout() async {
     final db = context.read<DatabaseService>();
     final gemini = context.read<GeminiService>();
+    final sync = context.read<SyncService>();
     
     // 1. Fetch Session Logs for AI Analysis
     final logs = await db.getLogsForSession(_sessionId);
@@ -289,6 +291,9 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
     // 2. Clear focus/player
     context.read<WorkoutPlayerService>().finishWorkout();
     await db.endSession(_sessionId, DateTime.now());
+
+    // 2.5 Auto-Sync (NEW)
+    sync.syncAll();
 
     // 3. Show AI Insight (Blitz)
     if (mounted && logs.isNotEmpty) {
@@ -401,6 +406,16 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
                           _flatFlow[_currentStepIndex], 
                           player,
                           key: ValueKey("step_$_currentStepIndex"),
+                          onSetLogged: () {
+                            // AUTO-SAVE CHECKPOINT (NEW)
+                            context.read<DatabaseService>().pauseSession(
+                              _sessionId, 
+                              widget.planId ?? 'unknown', 
+                              widget.workoutDay?.name ?? 'Unknown Day', 
+                              _currentStepIndex,
+                              {'tonnage': _sessionTotalTonnage}
+                            );
+                          },
                         ),
                       )
                     ),
@@ -597,7 +612,7 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
     );
   }
 
-  Widget _buildCurrentExerciseFocus(WorkoutExercise ex, WorkoutPlayerService player, {Key? key}) {
+  Widget _buildCurrentExerciseFocus(WorkoutExercise ex, WorkoutPlayerService player, {Key? key, VoidCallback? onSetLogged}) {
     // Determine set number for THIS exercise
     int setNum = 0;
     for (int i = 0; i <= _currentStepIndex; i++) {
@@ -651,6 +666,7 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
                        if (!_completedKeys.contains(key)) {
                          await _logSet(ex);
                          player.completeSet(ex.restSeconds);
+                         if (onSetLogged != null) onSetLogged(); // NEW
                          setState(() {
                            _currentStepIndex++;
                          });
@@ -820,6 +836,7 @@ class ExerciseCard extends StatefulWidget {
   final double? oneRepMax;
   final String? oneRepDate;
   final Function(int) onSetCompleted;
+  final VoidCallback? onSetLogged; // NEW
 
   const ExerciseCard({
     super.key, 
@@ -829,6 +846,7 @@ class ExerciseCard extends StatefulWidget {
     this.oneRepMax,
     this.oneRepDate,
     required this.onSetCompleted,
+    this.onSetLogged, // NEW
   });
 
   @override
@@ -905,6 +923,7 @@ class _ExerciseCardState extends State<ExerciseCard> {
 
     setState(() => _isDone[index] = true);
     widget.onSetCompleted(widget.exercise.restSeconds);
+    if (widget.onSetLogged != null) widget.onSetLogged!(); // NEW: Trigger checkpoint
     
     if (_isTimerRunning) _toggleTimer();
     setState(() => _localSeconds = 0);

@@ -79,9 +79,12 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
 
     // 2. Remote Search (Wiki)
     List<Exercise> remoteExercises = [];
-    final connectivity = await Connectivity().checkConnectivity();
+    final dynamic connectivity = await Connectivity().checkConnectivity();
+    final bool isOffline = connectivity is List 
+      ? connectivity.contains(ConnectivityResult.none)
+      : connectivity == ConnectivityResult.none;
     
-    if (connectivity == ConnectivityResult.none) {
+    if (isOffline) {
       setState(() => _isOffline = true);
     } else {
       setState(() => _isOffline = false);

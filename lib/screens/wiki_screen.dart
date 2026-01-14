@@ -30,8 +30,12 @@ class _WikiScreenState extends State<WikiScreen> {
   Future<void> _fetchExercises([String? query]) async {
     setState(() => _isLoading = true);
     
-    final connectivity = await Connectivity().checkConnectivity();
-    if (connectivity == ConnectivityResult.none) {
+    final dynamic connectivity = await Connectivity().checkConnectivity();
+    final bool isOffline = connectivity is List 
+      ? connectivity.contains(ConnectivityResult.none)
+      : connectivity == ConnectivityResult.none;
+
+    if (isOffline) {
       if (mounted) {
         setState(() {
           _isOffline = true;
