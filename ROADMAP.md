@@ -80,5 +80,14 @@
 ## v1.5.0: The Intelligence Update
 **Goal:** Conversational AI Coach.
 * **Features:**
-    * [x] **Chat Interface:** RAG (Retrieval-Augmented Generation) on user's `workout_logs`.
     * [x] **Querying:** "Why is my bench press stalled?" -> AI analyzes volume/intensity trends.
+
+---
+
+## v1.6.0: The Analytics & Polish Update (Upcoming)
+**Goal:** Empower users with data insights and precision tracking.
+* **Features:**
+    * [ ] **Workout Export:** Export logs as CSV/JSON for external backup.
+    * [ ] **Visual Volume:** Radar charts or Heatmaps showing 30-day muscle group distribution.
+    * [ ] **Smart Rest Timers:** Per-exercise customizable rest periods with optional TTS cues.
+    * [ ] **Machine Creator Persistence:** Finalize the Smart Machine Creator to save to the local DB.

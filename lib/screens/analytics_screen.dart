@@ -6,6 +6,7 @@ import '../services/analytics_service.dart';
 import '../theme.dart';
 import '../models/exercise.dart';
 import '../widgets/muscle_heatmap.dart';
+import '../widgets/muscle_radar_chart.dart';
 import 'weekly_review_screen.dart'; // NEW
 
 class AnalyticsScreen extends StatefulWidget {
@@ -18,6 +19,7 @@ class AnalyticsScreen extends StatefulWidget {
 class _AnalyticsScreenState extends State<AnalyticsScreen> {
   bool _isLoading = true;
   Map<String, double> _heatmapData = {};
+  Map<String, double> _balanceData = {};
   List<Map<String, dynamic>> _weeklyVolume = [];
   late AnalyticsService _analyticsService;
 
@@ -36,15 +38,17 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     // 1. Fetch Weekly Volume
     final vol = await dbService.getWeeklyVolume();
 
-    // 2. Fetch Heatmap Data
+    // 2. Fetch Heatmap & Balance Data
     List<Exercise> allExercises = await dbService.getCustomExercises();
     
     final heatMap = await _analyticsService.generateMuscleHeatmapData(allExercises);
+    final balance = await _analyticsService.generateMuscleGroupBalance(allExercises);
 
     if (mounted) {
       setState(() {
         _weeklyVolume = vol;
         _heatmapData = heatMap;
+        _balanceData = balance;
         _isLoading = false;
       });
     }
@@ -103,6 +107,24 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           
           MuscleHeatmap(muscleIntensities: _heatmapData),
           
+          const SizedBox(height: 32),
+
+          // 3. Balance Section
+          Text("Muscle Group Balance", style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 8),
+          const Text("Distribution across major muscle groups."),
+          const SizedBox(height: 16),
+          Container(
+            height: 300,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppTheme.foundationalSlate.withValues(alpha: 0.1)),
+            ),
+            child: MuscleRadarChart(data: _balanceData),
+          ),
+
           const SizedBox(height: 32),
         ],
       ),

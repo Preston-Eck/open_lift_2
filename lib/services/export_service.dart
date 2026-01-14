@@ -1,66 +1,61 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:path_provider/path_provider.dart';
 import 'database_service.dart';
-import 'package:intl/intl.dart';
 
 class ExportService {
   final DatabaseService _db;
 
   ExportService(this._db);
 
-  /// Exports all user data to a single JSON file and shares/saves it.
-  Future<void> exportAllData() async {
-    try {
-      final data = await _gatherData();
-      final jsonString = const JsonEncoder.withIndent('  ').convert(data);
-      
-      final timestamp = DateFormat('yyyyMMdd_HHmm').format(DateTime.now());
-      final fileName = 'openlift_backup_$timestamp.json';
+  Future<void> exportToCSV() async {
+    final logs = await _db.getLogsInDateRange(
+      DateTime.now().subtract(const Duration(days: 365 * 10)), // All time approx
+      DateTime.now(),
+    );
 
-      final directory = await getApplicationDocumentsDirectory();
-      final file = File('${directory.path}/$fileName');
-      
-      await file.writeAsString(jsonString);
+    if (logs.isEmpty) throw "No logs to export.";
 
-      // On Mobile/Desktop, Share/Save dialog
-      if (!kIsWeb) {
-        // Share via share_plus
-        // Note: On Windows this might open a share dialog or just need a "Save As".
-        // share_plus 7.0+ supports XFile
-        // ignore: deprecated_member_use
-        await Share.shareXFiles([XFile(file.path)], text: 'OpenLift Backup Data');
-      }
-      
-      debugPrint("Export success: ${file.path}");
-    } catch (e) {
-      debugPrint("Export failed: $e");
-      rethrow;
+    StringBuffer csv = StringBuffer();
+    // Header
+    csv.writeln("Date,Exercise,Weight,Reps,Volume,RPE,PR,SessionID");
+
+    for (var log in logs) {
+      csv.writeln(
+        "${log.timestamp},${log.exerciseName},${log.weight},${log.reps},${log.volumeLoad},${log.rpe},${log.isPr},${log.sessionId}",
+      );
     }
+
+    await _shareFile(csv.toString(), "openlift_logs.csv", "text/csv");
   }
 
-  Future<Map<String, dynamic>> _gatherData() async {
-    return {
-      'metadata': {
-        'version': '1.0',
-        'exported_at': DateTime.now().toIso8601String(),
-        'app_version': '1.1.0',
-      },
-      'profile': await _db.getUserProfile(),
-      'gym_profiles': await _db.getGymProfiles().then((l) => l.map((e) => e.toMap()).toList()),
-      'equipment': await _db.getUserEquipmentList(),
-      'plans': await _db.getAllPlansRaw(),
-      'logs': await _db.getAllLogsRaw(),
-      'custom_exercises': await _db.getCustomExercises().then((l) => l.map((e) => {
-        'id': e.id,
-        'name': e.name,
-        'category': e.category,
-        'primary_muscles': e.primaryMuscles,
-        'equipment': e.equipment,
-        'notes': e.instructions
-      }).toList()),
-    };
+  Future<void> exportToJSON() async {
+    final logs = await _db.getAllLogsRaw();
+
+    if (logs.isEmpty) throw "No logs to export.";
+
+    final jsonString = jsonEncode(logs);
+    await _shareFile(jsonString, "openlift_logs.json", "application/json");
+  }
+
+  Future<void> _shareFile(String content, String fileName, String mimeType) async {
+    if (kIsWeb) {
+      // For Web, we use a simple anchor element trick (not ideal in a service but common in Flutter Web)
+      // Alternatively, we could use a package, but this is proof of concept.
+      // In a real app, we might use 'dart:html' which is not available in cross-platform code easily.
+      // For now, on web, we'll just print or throw not supported if we can't easily implement.
+      throw "Export not yet supported on Web.";
+    } else {
+      final directory = await getTemporaryDirectory();
+      final file = File('${directory.path}/$fileName');
+      await file.writeAsString(content);
+
+      await Share.shareXFiles(
+        [XFile(file.path, mimeType: mimeType)],
+        subject: 'My OpenLift Workout Logs',
+      );
+    }
   }
 }

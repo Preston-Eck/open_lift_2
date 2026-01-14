@@ -576,6 +576,12 @@ class DatabaseService extends ChangeNotifier {
     final res = await db.query('workout_plans', where: 'deleted_at IS NULL'); 
     return res.map((e) => WorkoutPlan.fromMap(e)).toList(); 
   }
+  Future<WorkoutPlan?> getPlanById(String id) async {
+    final db = await database;
+    final res = await db.query('workout_plans', where: 'id = ? AND deleted_at IS NULL', limit: 1);
+    if (res.isEmpty) return null;
+    return WorkoutPlan.fromMap(res.first);
+  }
   Future<void> deletePlan(String id) async { 
     final db = await database; 
     await db.update('workout_plans', {

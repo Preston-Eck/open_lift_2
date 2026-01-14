@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/database_service.dart';
+import '../services/export_service.dart';
 import '../widgets/one_rep_max_dialog.dart';
 
 class StrengthProfileScreen extends StatefulWidget {
@@ -100,6 +101,46 @@ class _StrengthProfileScreenState extends State<StrengthProfileScreen> {
     return _isMetric ? lbs * 0.453592 : lbs;
   }
 
+  void _showExportOptions() {
+    final db = context.read<DatabaseService>();
+    final export = ExportService(db);
+
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.table_chart),
+              title: const Text("Export as CSV"),
+              onTap: () async {
+                Navigator.pop(context);
+                try {
+                  await export.exportToCSV();
+                } catch (e) {
+                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Export failed: $e")));
+                }
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.code),
+              title: const Text("Export as JSON"),
+              onTap: () async {
+                Navigator.pop(context);
+                try {
+                  await export.exportToJSON();
+                } catch (e) {
+                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Export failed: $e")));
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
@@ -108,7 +149,16 @@ class _StrengthProfileScreenState extends State<StrengthProfileScreen> {
     final unitLabel = _isMetric ? "kg" : "lbs";
 
     return Scaffold(
-      appBar: AppBar(title: const Text("Strength Profile")),
+      appBar: AppBar(
+        title: const Text("Strength Profile"),
+        actions: [
+          IconButton(
+            onPressed: _showExportOptions, 
+            icon: const Icon(Icons.download),
+            tooltip: "Export Logs",
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton(
         onPressed: _addEntryDialog, 
         backgroundColor: Colors.blueAccent,

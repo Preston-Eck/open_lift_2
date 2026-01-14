@@ -47,4 +47,37 @@ class AnalyticsService {
 
     return heatMap;
   }
+
+  /// Categorizes muscle volumes into 6 major groups for balance analysis.
+  Future<Map<String, double>> generateMuscleGroupBalance(List<Exercise> allExercises) async {
+    final heatmapData = await generateMuscleHeatmapData(allExercises);
+    if (heatmapData.isEmpty) return {};
+
+    final Map<String, double> groups = {
+      'Chest': 0,
+      'Back': 0,
+      'Legs': 0,
+      'Shoulders': 0,
+      'Arms': 0,
+      'Core': 0,
+    };
+
+    final mapper = {
+      'chest': 'Chest', 'pectorals': 'Chest', 'pecs': 'Chest',
+      'back': 'Back', 'lats': 'Back', 'traps': 'Back', 'erectors': 'Back',
+      'legs': 'Legs', 'quads': 'Legs', 'hamstrings': 'Legs', 'glutes': 'Legs', 'calves': 'Legs',
+      'shoulders': 'Shoulders', 'delts': 'Shoulders', 'deltoids': 'Shoulders',
+      'arms': 'Arms', 'biceps': 'Arms', 'triceps': 'Arms', 'forearms': 'Arms',
+      'abs': 'Core', 'core': 'Core', 'obliques': 'Core', 'abdominals': 'Core',
+    };
+
+    heatmapData.forEach((muscle, intensity) {
+      if (mapper.containsKey(muscle)) {
+        final group = mapper[muscle]!;
+        if (intensity > groups[group]!) groups[group] = intensity;
+      }
+    });
+
+    return groups;
+  }
 }

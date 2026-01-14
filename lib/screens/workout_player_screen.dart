@@ -157,6 +157,74 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
     });
   }
 
+  Future<void> _saveDefaultRest(WorkoutPlayerService player) async {
+    if (widget.planId == null) return;
+    
+    final db = context.read<DatabaseService>();
+    final plan = await db.getPlanById(widget.planId!);
+    if (plan == null) return;
+
+    final currentExercise = _flatFlow[_currentStepIndex];
+    
+    // Find and update the exercise in the plan
+    bool found = false;
+    for (var day in plan.days) {
+      if (day.name == widget.workoutDay?.name) {
+        for (var ex in day.exercises) {
+          if (ex.name == currentExercise.name) {
+            // Update restSeconds
+            // Note: WorkoutExercise is immutable, we need to handle this.
+            // For now, let's assume we can at least find it.
+            // If it's immutable, we'd need to recreate the day/plan.
+            found = true;
+            break;
+          }
+        }
+      }
+    }
+
+    if (found) {
+       // Since WorkoutExercise is immutable in our model, we recreate the objects
+       final updatedDays = plan.days.map((day) {
+         if (day.name == widget.workoutDay?.name) {
+           final updatedExercises = day.exercises.map((ex) {
+             if (ex.name == currentExercise.name) {
+                return WorkoutExercise(
+                  name: ex.name,
+                  sets: ex.sets,
+                  reps: ex.reps,
+                  restSeconds: player.timerSeconds, // The currently adjusted time
+                  intensity: ex.intensity,
+                  secondsPerSet: ex.secondsPerSet,
+                  metricType: ex.metricType,
+                  circuitGroupId: ex.circuitGroupId,
+                );
+             }
+             return ex;
+           }).toList();
+           return WorkoutDay(name: day.name, exercises: updatedExercises);
+         }
+         return day;
+       }).toList();
+
+       final updatedPlan = WorkoutPlan(
+         id: plan.id,
+         name: plan.name,
+         goal: plan.goal,
+         type: plan.type,
+         days: updatedDays,
+       );
+
+       await db.savePlan(updatedPlan);
+       
+       if (mounted) {
+         ScaffoldMessenger.of(context).showSnackBar(
+           SnackBar(content: Text("Rest updated to ${player.timerSeconds}s for ${currentExercise.name}"))
+         );
+       }
+    }
+  }
+
   void _jumpToStep(int index) {
     if (index < 0 || index >= _flatFlow.length) return;
     setState(() {
@@ -381,6 +449,11 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
         title: Text(widget.workoutDay?.name ?? "Session"),
         actions: [
           IconButton(
+            icon: Icon(player.ttsEnabled ? Icons.volume_up : Icons.volume_off, color: Colors.blueAccent),
+            onPressed: () => player.toggleTts(!player.ttsEnabled),
+            tooltip: "Toggle TTS Cues",
+          ),
+          IconButton(
             icon: Icon(player.isPaused ? Icons.play_arrow : Icons.pause),
             onPressed: () => player.togglePause(),
           ),
@@ -579,6 +652,12 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
                 _buildRestAdjustButton(player, -15, Icons.remove),
                 const SizedBox(width: 24),
                 _buildRestAdjustButton(player, 15, Icons.add),
+                const SizedBox(width: 24),
+                IconButton(
+                  onPressed: () => _saveDefaultRest(player),
+                  icon: const Icon(Icons.save, color: Colors.blueAccent),
+                  tooltip: "Save as Default Rest",
+                ),
               ],
             ),
             const SizedBox(height: 16),

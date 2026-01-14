@@ -2,26 +2,32 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter_tts/flutter_tts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 enum WorkoutState { idle, countdown, working, resting, finished }
 
 class WorkoutPlayerService extends ChangeNotifier {
   final AudioPlayer _audioPlayer = AudioPlayer();
+  final FlutterTts _flutterTts = FlutterTts();
+  
+  bool _ttsEnabled = true;
   
   WorkoutPlayerService() {
     _initAudioSession();
+    _loadSettings();
   }
 
   void _initAudioSession() {
-    AudioPlayer.global.setAudioContext(AudioContext(
-      android: const AudioContextAndroid(
+    AudioPlayer.global.setAudioContext(const AudioContext(
+      android: AudioContextAndroid(
         isSpeakerphoneOn: true,
         stayAwake: true,
         contentType: AndroidContentType.sonification,
         usageType: AndroidUsageType.assistanceSonification,
         audioFocus: AndroidAudioFocus.gainTransientMayDuck,
       ),
-      iOS: const AudioContextIOS(
+      iOS: AudioContextIOS(
         category: AVAudioSessionCategory.ambient,
         options: [
           AVAudioSessionOptions.mixWithOthers,
@@ -30,6 +36,21 @@ class WorkoutPlayerService extends ChangeNotifier {
       ),
     ));
   }
+
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    _ttsEnabled = prefs.getBool('tts_enabled') ?? true;
+    notifyListeners();
+  }
+
+  Future<void> toggleTts(bool enabled) async {
+    _ttsEnabled = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('tts_enabled', enabled);
+    notifyListeners();
+  }
+
+  bool get ttsEnabled => _ttsEnabled;
   
   WorkoutState _state = WorkoutState.idle;
   int _timerSeconds = 0;
@@ -59,7 +80,6 @@ class WorkoutPlayerService extends ChangeNotifier {
 
   void togglePause() {
     _isPaused = !_isPaused;
-    debugPrint("WorkoutPlayerService: togglePause called, isPaused: $_isPaused, state: $_state");
     if (_isPaused) {
       _timer?.cancel();
     } else {
@@ -83,6 +103,14 @@ class WorkoutPlayerService extends ChangeNotifier {
       } else if (_state == WorkoutState.resting) {
         if (_timerSeconds > 0) {
           if (_timerSeconds <= 3) _playBeep();
+          
+          if (_ttsEnabled && _timerSeconds == 5) {
+            _speak("Next set in five seconds");
+          }
+          if (_ttsEnabled && _timerSeconds == 10) {
+             _speak("Ten seconds remaining");
+          }
+
           _timerSeconds--;
         } else {
           _finishRest();
@@ -90,6 +118,11 @@ class WorkoutPlayerService extends ChangeNotifier {
       }
       notifyListeners();
     });
+  }
+
+  Future<void> _speak(String text) async {
+    if (!_ttsEnabled) return;
+    await _flutterTts.speak(text);
   }
 
   void updateDraft(String? weight, String? reps, double? rpe) {
@@ -113,6 +146,7 @@ class WorkoutPlayerService extends ChangeNotifier {
     _currentSetIndex = 1;
     _startCountdown();
     WakelockPlus.enable();
+    if (_ttsEnabled) _speak("Workout started. Good luck!");
   }
 
   void _startCountdown() {
@@ -166,12 +200,11 @@ class WorkoutPlayerService extends ChangeNotifier {
   }
 
   void skipRest() {
-    debugPrint("WorkoutPlayerService: skipRest called. Current state: $_state, seconds: $_timerSeconds");
     _timer?.cancel();
     _isPaused = false;
     _currentSetIndex++;
     _startCountdown();
-    notifyListeners(); // Force immediate update
+    notifyListeners();
   }
 
   void nextExercise() {
@@ -193,6 +226,7 @@ class WorkoutPlayerService extends ChangeNotifier {
     _isPaused = false;
     clearDraft(keepWeight: false);
     WakelockPlus.disable();
+    if (_ttsEnabled) _speak("Workout complete. Great job!");
     notifyListeners();
   }
 
@@ -208,7 +242,7 @@ class WorkoutPlayerService extends ChangeNotifier {
   void dispose() {
     _timer?.cancel();
     _audioPlayer.dispose();
+    _flutterTts.stop();
     super.dispose();
   }
 }
-

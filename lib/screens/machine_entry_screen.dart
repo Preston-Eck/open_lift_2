@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../services/ai_equipment_service.dart';
+import '../services/database_service.dart';
 import '../models/attachment.dart';
 import '../models/exercise.dart'; // Assuming this exists or similar
 
@@ -91,10 +92,21 @@ class _MachineEntryScreenState extends State<MachineEntryScreen> {
     }
   }
 
-  void _saveMachine() {
-    // TODO: persist to DB with identified exercises
-    Navigator.pop(context);
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Machine Saved!")));
+  Future<void> _saveMachine() async {
+    final db = context.read<DatabaseService>();
+    
+    // 1. Save the Machine/Equipment
+    await db.saveCustomEquipment(
+      name: _titleController.text,
+      capabilities: _identifiedExercises,
+    );
+
+    if (mounted) {
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Machine '${_titleController.text}' Saved with ${_identifiedExercises.length} exercises!")),
+      );
+    }
   }
 
   @override
