@@ -17,6 +17,8 @@ import 'exercise_analytics_screen.dart';
 import 'global_search_screen.dart';
 import 'social_dashboard_screen.dart';
 import 'exercise_auditor_screen.dart'; 
+import 'workout_player_screen.dart'; 
+import '../models/plan.dart';
 import '../widgets/gym_selector.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -92,15 +94,28 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            FutureBuilder<DateTime?>(
+              future: db.getLastWorkoutDate(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData || snapshot.data == null) return const SizedBox.shrink();
+                final lastDate = snapshot.data!;
+                final daysSince = DateTime.now().difference(lastDate).inDays;
+
+                if (daysSince >= 3) {
+                  return _buildConsistencyNudge(context, daysSince);
+                }
+                return const SizedBox.shrink();
+              },
+            ),
             _buildWelcomeCard(context, auth),
             const SizedBox(height: 20),
-            
+
             // --- SOCIAL ENTRY POINT ---
             if (auth.isAuthenticated) ...[
               GestureDetector(
                 onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SocialDashboardScreen())),
                 child: Card(
-                  color: Colors.deepPurple.withValues(alpha: 0.1),
+                  color: Colors.deepPurple.withAlpha(30),
                   child: const ListTile(
                     leading: Icon(Icons.public, color: Colors.deepPurple, size: 30),
                     title: Text("Community & Friends", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple)),
@@ -111,6 +126,56 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 20),
             ],
+
+            FutureBuilder<Map<String, dynamic>?>(
+              future: db.getActiveSession(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData || snapshot.data == null) return const SizedBox.shrink();
+                final session = snapshot.data!;
+                return Card(
+                  color: Colors.green.withValues(alpha: 0.1),
+                  child: ListTile(
+                    leading: const Icon(Icons.play_circle_fill, color: Colors.green, size: 30),
+                    title: const Text("Workout in Progress!", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
+                    subtitle: Text("Resume: ${session['day_name']}"),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.red),
+                          onPressed: () => db.discardActiveSession(),
+                        ),
+                        const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.green),
+                      ],
+                    ),
+                    onTap: () async {
+                       final plans = await db.getPlans();
+                       WorkoutPlan? targetPlan;
+                       WorkoutDay? targetDay;
+                       
+                       for (var p in plans) {
+                         if (p.id == session['plan_id']) targetPlan = p;
+                         for (var d in p.days) {
+                           if (d.name == session['day_name']) targetDay = d;
+                         }
+                       }
+
+                       if (targetDay != null && mounted) {
+                         Navigator.push(context, MaterialPageRoute(builder: (_) => WorkoutPlayerScreen(
+                           workoutDay: targetDay,
+                           planId: session['plan_id'],
+                           initialStepIndex: session['step_index'],
+                           resumeSessionId: session['id'],
+                           isHiit: targetPlan?.type == 'HIIT',
+                         )));
+                       } else {
+                         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error: Plan day not found locally.")));
+                       }
+                    },
+                  ),
+                );
+              },
+            ),
 
             GestureDetector(
               onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AnalyticsScreen())),
@@ -290,6 +355,19 @@ class _HomeScreenState extends State<HomeScreen> {
           },
         ),
       ],
+    );
+  }
+
+  Widget _buildConsistencyNudge(BuildContext context, int daysSince) {
+    return Card(
+      color: Colors.orange.withAlpha(30),
+      margin: const EdgeInsets.only(bottom: 20),
+      child: ListTile(
+        leading: const Icon(Icons.timer_outlined, color: Colors.orange, size: 30),
+        title: const Text("Consistency is Key!", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.orange)),
+        subtitle: Text("It's been $daysSince days since your last session. Ready to get back at it?"),
+        trailing: const Icon(Icons.fitness_center, color: Colors.orange),
+      ),
     );
   }
 

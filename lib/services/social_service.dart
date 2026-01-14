@@ -37,13 +37,24 @@ class SocialService {
   /// Send a request to another user
   Future<void> sendFriendRequest(String targetUserId) async {
     final myId = _auth.user!.id;
+    final myName = _auth.profile?['username'] ?? 'A friend';
     
-    // Check if reverse exists (they sent me one)
-    // For MVP we just try insert; Supabase unique constraint (requester, receiver) handles dupes
+    // 1. Insert Friendship row
     await _supabase.from('friendships').insert({
       'requester_id': myId,
       'receiver_id': targetUserId,
       'status': 'pending',
+    });
+
+    // 2. Send Notification
+    await _supabase.from('notifications').insert({
+      'user_id': targetUserId,
+      'type': 'friend_request',
+      'payload_json': {
+        'sender_id': myId,
+        'sender_name': myName,
+      },
+      'is_read': false,
     });
   }
 
@@ -84,8 +95,8 @@ class SocialService {
         .from('friendships')
         .select('''
           *,
-          requester:requester_id(id, username, avatar_url),
-          receiver:receiver_id(id, username, avatar_url)
+          requester:requester_id(id, username, avatar_url, last_seen),
+          receiver:receiver_id(id, username, avatar_url, last_seen)
         ''')
         .or('requester_id.eq.$myId,receiver_id.eq.$myId')
         .eq('status', 'accepted');
@@ -99,6 +110,7 @@ class SocialService {
         'friend_id': friendProfile['id'],
         'username': friendProfile['username'],
         'avatar_url': friendProfile['avatar_url'],
+        'last_seen': friendProfile['last_seen'],
       };
     }).toList();
   }
@@ -174,22 +186,49 @@ class SocialService {
     });
   }
 
+  Future<void> sendVersusInvite(String friendId, String roomId) async {
+    final myName = _auth.profile?['username'] ?? 'A friend';
+
+    await _supabase.from('notifications').insert({
+      'user_id': friendId,
+      'type': 'versus_invite',
+      'payload_json': {
+        'room_id': roomId,
+        'inviter_name': myName,
+      },
+      'is_read': false,
+    });
+  }
+
+  Future<void> sendNudge(String friendId) async {
+    final myName = _auth.profile?['username'] ?? 'A friend';
+    await _supabase.from('notifications').insert({
+      'user_id': friendId,
+      'type': 'nudge',
+      'payload_json': {
+        'sender_name': myName,
+        'message': "is nudging you to get back to the gym!"
+      },
+      'is_read': false,
+    });
+  }
+
   // --- ACTIVITY FEED (v1.1.0) ---
 
   Future<List<Map<String, dynamic>>> getFriendActivity() async {
-    final friends = await getFriends();
-    final friendIds = friends.map((f) => f['friend_id']).toList();
-    if (friendIds.isEmpty) return [];
+    final myId = _auth.user?.id;
+    if (myId == null) return [];
 
-    // Fetch logs from friends (using 'logs' table on Supabase)
-    final response = await _supabase
-        .from('logs')
-        .select('*, profiles:owner_id(username, avatar_url)')
-        .inFilter('owner_id', friendIds)
-        .order('timestamp', ascending: false)
-        .limit(50);
-        
-    return List<Map<String, dynamic>>.from(response);
+    try {
+      final response = await _supabase.rpc(
+        'get_friend_activity',
+        params: {'current_user_id': myId},
+      );
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      debugPrint("Friend Activity RPC Error: $e");
+      return [];
+    }
   }
 
   // --- COMMENTS & LIKES ---

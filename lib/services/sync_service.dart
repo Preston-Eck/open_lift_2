@@ -49,6 +49,7 @@ class SyncService extends ChangeNotifier {
       await _pullCustomExercises(lastSyncTime);
       await _pushGymProfiles();
       await _pullGymProfiles(lastSyncTime);
+      await _db.ensureGymExists(); // Ensure at least one gym exists after sync
 
       // 2. User Data (Plans & Logs)
       await _pushPlans();
@@ -417,6 +418,7 @@ class SyncService extends ChangeNotifier {
         'updated_at': l['last_updated'] ?? DateTime.now().toIso8601String(),
         'deleted_at': l['deleted_at'],
         'rpe': l['rpe'],
+        'is_pr': l['is_pr'] == 1, // Boolean on Supabase
       }).toList();
       
       await _supabase.from('logs').upsert(batch);
@@ -451,6 +453,7 @@ class SyncService extends ChangeNotifier {
         'last_updated': row['updated_at'],
         'deleted_at': row['deleted_at'],
         'rpe': row['rpe'],
+        'is_pr': row['is_pr'] == true ? 1 : 0,
       });
     }
     await _db.bulkInsertLogs(logs);

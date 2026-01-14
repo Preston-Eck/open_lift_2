@@ -22,14 +22,52 @@ class WorkoutPlayerService extends ChangeNotifier {
   String _draftReps = "";
   double _draftRpe = 7.0;
 
+  bool _isPaused = false;
+
   WorkoutState get state => _state;
   int get timerSeconds => _timerSeconds;
   int get currentExerciseIndex => _currentExerciseIndex;
   int get currentSetIndex => _currentSetIndex;
+  bool get isPaused => _isPaused;
   
   String get draftWeight => _draftWeight;
   String get draftReps => _draftReps;
   double get draftRpe => _draftRpe;
+
+  void togglePause() {
+    _isPaused = !_isPaused;
+    debugPrint("WorkoutPlayerService: togglePause called, isPaused: $_isPaused, state: $_state");
+    if (_isPaused) {
+      _timer?.cancel();
+    } else {
+      _resumeTimer();
+    }
+    notifyListeners();
+  }
+
+  void _resumeTimer() {
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_state == WorkoutState.countdown) {
+        if (_timerSeconds > 0) {
+          _playBeep();
+          _timerSeconds--;
+        } else {
+          _startWork();
+        }
+      } else if (_state == WorkoutState.working) {
+        _timerSeconds++;
+      } else if (_state == WorkoutState.resting) {
+        if (_timerSeconds > 0) {
+          if (_timerSeconds <= 3) _playBeep();
+          _timerSeconds--;
+        } else {
+          _finishRest();
+        }
+      }
+      notifyListeners();
+    });
+  }
 
   void updateDraft(String? weight, String? reps, double? rpe) {
     if (weight != null) _draftWeight = weight;
@@ -47,6 +85,7 @@ class WorkoutPlayerService extends ChangeNotifier {
 
   void startWorkout() {
     clearDraft(keepWeight: false);
+    _isPaused = false;
     _currentExerciseIndex = 0;
     _currentSetIndex = 1;
     _startCountdown();
@@ -56,36 +95,26 @@ class WorkoutPlayerService extends ChangeNotifier {
   void _startCountdown() {
     _state = WorkoutState.countdown;
     _timerSeconds = 3;
-    _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (_timerSeconds > 0) {
-        _playBeep();
-        _timerSeconds--;
-      } else {
-        _startWork();
-      }
-      notifyListeners();
-    });
+    _isPaused = false;
+    _resumeTimer();
     notifyListeners();
   }
 
   void _startWork() {
     _state = WorkoutState.working;
-    _timer?.cancel();
+    _isPaused = false;
     _playBeep(long: true);
     
     // Duration timer for 'time' based exercises
     _timerSeconds = 0;
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      _timerSeconds++;
-      notifyListeners();
-    });
+    _resumeTimer();
     notifyListeners();
   }
 
   void completeSet(int restTimeSeconds) {
     _timer?.cancel();
     _state = WorkoutState.resting;
+    _isPaused = false;
     _startRestTimer(restTimeSeconds + _nextRestAdjust);
     _nextRestAdjust = 0; // Consumption
     notifyListeners();
@@ -93,16 +122,14 @@ class WorkoutPlayerService extends ChangeNotifier {
 
   void _startRestTimer(int seconds) {
     _timerSeconds = seconds;
+    _isPaused = false;
+    _resumeTimer();
+  }
+
+  void _finishRest() {
     _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (_timerSeconds > 0) {
-        if (_timerSeconds <= 3) _playBeep();
-        _timerSeconds--;
-      } else {
-        _finishRest();
-      }
-      notifyListeners();
-    });
+    _currentSetIndex++;
+    _startCountdown();
   }
 
   void adjustRestTime(int deltaSeconds) {
@@ -116,20 +143,31 @@ class WorkoutPlayerService extends ChangeNotifier {
   }
 
   void skipRest() {
+    debugPrint("WorkoutPlayerService: skipRest called. Current state: $_state, seconds: $_timerSeconds");
     _timer?.cancel();
+    _isPaused = false;
     _currentSetIndex++;
     _startCountdown();
+    notifyListeners(); // Force immediate update
   }
 
   void nextExercise() {
+    _isPaused = false;
     _currentExerciseIndex++;
     _currentSetIndex = 1;
     _startCountdown();
   }
 
+  void resetToWork() {
+    _isPaused = false;
+    _timer?.cancel();
+    _startWork();
+  }
+
   void finishWorkout() {
     _state = WorkoutState.finished;
     _timer?.cancel();
+    _isPaused = false;
     clearDraft(keepWeight: false);
     WakelockPlus.disable();
     notifyListeners();

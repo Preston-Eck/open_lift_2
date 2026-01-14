@@ -4,28 +4,32 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/material.dart';
 
 class NotificationService {
-  final FirebaseMessaging _fcm = FirebaseMessaging.instance;
+  FirebaseMessaging get _fcm => FirebaseMessaging.instance;
   final FlutterLocalNotificationsPlugin _localNotifs = FlutterLocalNotificationsPlugin();
 
   Future<void> init() async {
-    // 1. Request Permission
-    await _fcm.requestPermission();
-    
-    // 2. Local Notifications Setup
-    const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const iosInit = DarwinInitializationSettings();
-    await _localNotifs.initialize(
-      const InitializationSettings(android: androidInit, iOS: iosInit),
-      onDidReceiveNotificationResponse: (details) {
-        // Handle notification click here (Deep Linking)
-        debugPrint("Notification Clicked: ${details.payload}");
-      },
-    );
+    try {
+      // 1. Request Permission
+      await _fcm.requestPermission();
+      
+      // 2. Local Notifications Setup
+      const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+      const iosInit = DarwinInitializationSettings();
+      await _localNotifs.initialize(
+        const InitializationSettings(android: androidInit, iOS: iosInit),
+        onDidReceiveNotificationResponse: (details) {
+          // Handle notification click here (Deep Linking)
+          debugPrint("Notification Clicked: ${details.payload}");
+        },
+      );
 
-    // 3. Listen to Foreground Messages
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      _showLocalNotification(message);
-    });
+      // 3. Listen to Foreground Messages
+      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+        _showLocalNotification(message);
+      });
+    } catch (e) {
+      debugPrint("⚠️ NotificationService Init Failed: $e");
+    }
   }
 
   Future<void> _showLocalNotification(RemoteMessage message) async {
@@ -49,6 +53,11 @@ class NotificationService {
   }
 
   Future<String?> getToken() async {
-    return await _fcm.getToken();
+    try {
+      return await _fcm.getToken();
+    } catch (e) {
+      debugPrint("⚠️ Error getting FCM token: $e");
+      return null;
+    }
   }
 }

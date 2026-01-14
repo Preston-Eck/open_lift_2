@@ -19,7 +19,9 @@ class WorkoutPlayerScreen extends StatefulWidget {
   final WorkoutDay? workoutDay;
   final String? planId;
   final bool isHiit;
-  final String? versusRoomId; // NEW: If provided, enable Versus mode
+  final String? versusRoomId; 
+  final int initialStepIndex; 
+  final String? resumeSessionId; 
 
   const WorkoutPlayerScreen({
     super.key, 
@@ -27,6 +29,8 @@ class WorkoutPlayerScreen extends StatefulWidget {
     this.planId, 
     this.isHiit = false,
     this.versusRoomId,
+    this.initialStepIndex = 0,
+    this.resumeSessionId,
   });
 
   @override
@@ -45,16 +49,18 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
   double _sessionTotalTonnage = 0; 
   double _currentRpe = 7.0; 
   bool _autoApplySmartRest = true; 
-
-  // Controllers for current set
+  final List<Key> _flowKeys = []; // Stable keys for reordering
+  final Set<Key> _completedKeys = {}; // Track completed sets by Key
+   // Controllers for current set
   final TextEditingController _weightController = TextEditingController();
   final TextEditingController _repsController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _sessionId = const Uuid().v4(); 
-    _initSession();
+    _sessionId = widget.resumeSessionId ?? const Uuid().v4(); 
+    _currentStepIndex = widget.initialStepIndex;
+    if (widget.resumeSessionId == null) _initSession();
     _loadData();
     _generateFlatFlow();
     
@@ -88,6 +94,8 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
 
   @override
   void dispose() {
+    _weightController.dispose();
+    _repsController.dispose();
     // Leave versus mode on exit
     if (widget.versusRoomId != null) {
       context.read<RealtimeService>().leaveVersus();
@@ -95,7 +103,7 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
     super.dispose();
   }
 
-  void _logSet(WorkoutExercise ex) {
+  Future<void> _logSet(WorkoutExercise ex) async {
     final weight = double.tryParse(_weightController.text) ?? 0.0;
     final reps = int.tryParse(_repsController.text) ?? 0;
     final setTonnage = weight * reps;
@@ -113,7 +121,11 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
       rpe: _currentRpe,
     );
 
-    context.read<DatabaseService>().logSet(log);
+    final isPr = await context.read<DatabaseService>().logSet(log);
+    
+    if (isPr) {
+      _showPRCelebration(ex.name, weight, reps);
+    }
     
     // Update local tonnage and broadcast
     setState(() {
@@ -129,6 +141,11 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
        context.read<WorkoutPlayerService>().setNextRestAdjust(30); // Add 30s automatically
     }
 
+    // Track completion
+    setState(() {
+      _completedKeys.add(_flowKeys[_currentStepIndex]);
+    });
+
     // Clear draft in service
     context.read<WorkoutPlayerService>().clearDraft(keepWeight: true);
 
@@ -137,6 +154,43 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
     setState(() {
       _currentRpe = 7.0;
     });
+  }
+
+  void _jumpToStep(int index) {
+    if (index < 0 || index >= _flatFlow.length) return;
+    setState(() {
+      _currentStepIndex = index;
+      _weightController.clear();
+      _repsController.clear();
+      _currentRpe = 7.0;
+    });
+    final player = context.read<WorkoutPlayerService>();
+    player.resetToWork();
+  }
+
+  void _showPRCelebration(String exercise, double weight, int reps) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: Colors.amber.shade700,
+        duration: const Duration(seconds: 4),
+        content: Row(
+          children: [
+            const Icon(Icons.stars, color: Colors.white),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text("NEW PERSONAL RECORD!", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+                  Text("$exercise: ${weight.toInt()} lbs x $reps", style: const TextStyle(color: Colors.white, fontSize: 12)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _generateFlatFlow() {
@@ -173,6 +227,10 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
       }
     }
     _flatFlow = flow;
+    _flowKeys.clear();
+    for (var i = 0; i < _flatFlow.length; i++) {
+      _flowKeys.add(UniqueKey());
+    }
   }
 
   Future<void> _initSession() async {
@@ -253,12 +311,29 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
               ),
               content: snapshot.connectionState == ConnectionState.waiting
                   ? const SizedBox(height: 60, child: Center(child: CircularProgressIndicator(color: Colors.amber)))
-                  : Text(insight, style: const TextStyle(color: Colors.white, fontSize: 16)),
+                  : SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (logs.any((l) => l.isPr)) ...[
+                            const Text("🎉 ACHIEVEMENTS:", style: TextStyle(color: Colors.amber, fontWeight: FontWeight.bold, fontSize: 12)),
+                            const SizedBox(height: 8),
+                            ...logs.where((l) => l.isPr).map((l) => Padding(
+                              padding: const EdgeInsets.only(bottom: 4),
+                              child: Text("• ${l.exerciseName} PR: ${l.weight.toInt()}x${l.reps}", style: const TextStyle(color: Colors.white, fontSize: 14)),
+                            )),
+                            const Divider(color: Colors.white24, height: 24),
+                          ],
+                          Text(insight, style: const TextStyle(color: Colors.white, fontSize: 16)),
+                        ],
+                      ),
+                    ),
               actions: [
                 TextButton(
                   onPressed: () {
                     Navigator.pop(ctx); // Close Dialog
-                    Navigator.pop(context); // Close Player
+                    Navigator.of(context).pop(); // Close Player
                   },
                   child: const Text("DONE", style: TextStyle(color: Colors.amber, fontWeight: FontWeight.bold)),
                 ),
@@ -268,7 +343,7 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
         ),
       );
     } else {
-      if (mounted) Navigator.pop(context);
+      if (mounted) Navigator.of(context).pop();
     }
   }
 
@@ -283,8 +358,27 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          onPressed: () async {
+            // Save & Exit logic
+            final db = context.read<DatabaseService>();
+            await db.pauseSession(
+              _sessionId, 
+              widget.planId ?? 'unknown', 
+              widget.workoutDay?.name ?? 'Unknown Day', 
+              _currentStepIndex,
+              {'tonnage': _sessionTotalTonnage}
+            );
+            if (mounted) Navigator.of(context).pop();
+          },
+        ),
         title: Text(widget.workoutDay?.name ?? "Session"),
         actions: [
+          IconButton(
+            icon: Icon(player.isPaused ? Icons.play_arrow : Icons.pause),
+            onPressed: () => player.togglePause(),
+          ),
           TextButton(onPressed: _finishWorkout, child: const Text("FINISH", style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold))),
         ],
       ),
@@ -299,12 +393,107 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
           // 2. CURRENT EXERCISE FOCUS
           Expanded(
             child: _currentStepIndex < _flatFlow.length 
-              ? _buildCurrentExerciseFocus(_flatFlow[_currentStepIndex], player)
+              ? Column(
+                  children: [
+                    Expanded(
+                      child: SingleChildScrollView(
+                        child: _buildCurrentExerciseFocus(
+                          _flatFlow[_currentStepIndex], 
+                          player,
+                          key: ValueKey("step_$_currentStepIndex"),
+                        ),
+                      )
+                    ),
+                    const Divider(color: Colors.white12),
+                    _buildWorkoutQueue(),
+                  ],
+                )
               : const Center(child: Text("Workout Complete!", style: TextStyle(color: Colors.white))),
           ),
 
           // 3. NAVIGATION / SKIP
           _buildBottomControls(player),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWorkoutQueue() {
+    return Container(
+      height: 120,
+      width: double.infinity,
+      color: Colors.white.withValues(alpha: 0.05),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Text("UPCOMING QUEUE", style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 10)),
+          ),
+          Expanded(
+            child: ReorderableListView.builder(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              itemCount: _flatFlow.length,
+              onReorder: (int oldIndex, int newIndex) {
+                 if (oldIndex < newIndex) {
+                   newIndex -= 1;
+                 }
+                 // Prevent reordering past/completed items
+                 if (oldIndex < _currentStepIndex || newIndex < _currentStepIndex) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Cannot rearrange completed exercises!"), duration: Duration(seconds: 1)));
+                    return;
+                 }
+                 setState(() {
+                   final item = _flatFlow.removeAt(oldIndex);
+                   _flatFlow.insert(newIndex, item);
+                   
+                   final key = _flowKeys.removeAt(oldIndex);
+                   _flowKeys.insert(newIndex, key);
+                 });
+              },
+              proxyDecorator: (child, index, animation) {
+                 return Material(
+                   color: Colors.transparent,
+                   child: child, 
+                 );
+              },
+              itemBuilder: (ctx, index) {
+                final ex = _flatFlow[index];
+                final bool isCurrent = index == _currentStepIndex;
+                final key = _flowKeys[index];
+                
+                return InkWell(
+                  key: key, 
+                  onTap: () => _jumpToStep(index),
+                  child: Container(
+                    width: 100,
+                    margin: const EdgeInsets.only(right: 8),
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: isCurrent ? Colors.blue.withValues(alpha: 0.2) : (_completedKeys.contains(key) ? Colors.green.withValues(alpha: 0.1) : Colors.white.withValues(alpha: 0.05)),
+                      borderRadius: BorderRadius.circular(8),
+                      border: isCurrent ? Border.all(color: Colors.blue, width: 2) : Border.all(color: Colors.white10),
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          ex.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: isCurrent ? Colors.white : Colors.grey, fontSize: 10, fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal),
+                        ),
+                        const SizedBox(height: 4),
+                        if (_completedKeys.contains(key)) const Icon(Icons.check_circle, color: Colors.green, size: 14)
+                        else Text("Set ${index + 1}", style: const TextStyle(color: Colors.grey, fontSize: 9)),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
         ],
       ),
     );
@@ -376,7 +565,18 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
                 const SizedBox(width: 24),
                 _buildRestAdjustButton(player, 15, Icons.add),
               ],
-            )
+            ),
+            const SizedBox(height: 16),
+              // Wrap in Builder to ensure context is valid if needed, or just plain button
+              Builder(builder: (c) => ElevatedButton(
+                  onPressed: () => player.skipRest(),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white, 
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                  ),
+                  child: const Text("SKIP REST", style: TextStyle(fontWeight: FontWeight.bold)),
+              )),
           ]
         ],
       ),
@@ -397,7 +597,7 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
     );
   }
 
-  Widget _buildCurrentExerciseFocus(WorkoutExercise ex, WorkoutPlayerService player) {
+  Widget _buildCurrentExerciseFocus(WorkoutExercise ex, WorkoutPlayerService player, {Key? key}) {
     // Determine set number for THIS exercise
     int setNum = 0;
     for (int i = 0; i <= _currentStepIndex; i++) {
@@ -405,6 +605,7 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
     }
 
     return Padding(
+      key: key,
       padding: const EdgeInsets.all(24.0),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -429,6 +630,35 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
               _buildLargeInput("LBS", ex.intensity ?? "100", _weightController),
               const SizedBox(width: 24),
               _buildLargeInput(ex.metricType == 'time' ? "SEC" : "REPS", ex.reps, _repsController),
+              const SizedBox(width: 16),
+              // INLINE COMPLETE BUTTON (Fail-safe)
+              // Faded until selected (User Request)
+              AnimatedOpacity(
+                duration: const Duration(milliseconds: 300),
+                opacity: _completedKeys.contains(_flowKeys[_currentStepIndex]) ? 1.0 : 0.4,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: _completedKeys.contains(_flowKeys[_currentStepIndex]) ? Colors.green : Colors.grey[800],
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2))]
+                  ),
+                  child: IconButton(
+                    icon: const Icon(Icons.check, color: Colors.white, size: 28),
+                    onPressed: () async {
+                       // Allow toggle? Or just strict 'complete'? 
+                       // For now, let's keep strict log.
+                       final key = _flowKeys[_currentStepIndex];
+                       if (!_completedKeys.contains(key)) {
+                         await _logSet(ex);
+                         player.completeSet(ex.restSeconds);
+                         setState(() {
+                           _currentStepIndex++;
+                         });
+                       }
+                    },
+                  ),
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 48),
@@ -497,7 +727,7 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
              Navigator.push(context, MaterialPageRoute(builder: (_) => ExerciseDetailScreen(exercise: meta!)));
           },
           icon: const Icon(Icons.info_outline, size: 16, color: Colors.blueAccent),
-          label: const Text("Form Guide", style: TextStyle(color: Colors.blueAccent, fontSize: 12)),
+          label: const Text("Exercise Detail", style: TextStyle(color: Colors.blueAccent, fontSize: 12)),
         ),
       ],
     );
@@ -508,17 +738,23 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
       children: [
         Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)),
         const SizedBox(height: 8),
-        SizedBox(
-          width: 100,
+        Container(
+          width: 120,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.9),
+            borderRadius: BorderRadius.circular(12),
+          ),
           child: TextField(
             controller: controller,
             textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
-            keyboardType: TextInputType.number,
+            style: const TextStyle(color: Colors.black87, fontSize: 24, fontWeight: FontWeight.bold),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
             decoration: InputDecoration(
               hintText: hint,
-              hintStyle: TextStyle(color: Colors.grey.withValues(alpha: 0.3)),
-              enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.grey)),
+              hintStyle: TextStyle(color: Colors.black26),
+              border: InputBorder.none,
+              isDense: true,
             ),
           ),
         )
@@ -530,10 +766,14 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
     final bool isWorking = player.state == WorkoutState.working;
 
     return Padding(
-      padding: const EdgeInsets.all(32.0),
+      padding: const EdgeInsets.fromLTRB(32, 8, 32, 32),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
+          IconButton(
+            icon: Icon(player.isPaused ? Icons.play_circle_filled : Icons.pause_circle_filled, color: Colors.white70, size: 40),
+            onPressed: () => player.togglePause(),
+          ),
           if (player.state == WorkoutState.resting)
             ElevatedButton(
               onPressed: () => player.skipRest(),
@@ -542,25 +782,24 @@ class _WorkoutPlayerScreenState extends State<WorkoutPlayerScreen> {
             ),
           
           if (isWorking)
-            SizedBox(
-              height: 80,
-              width: 200,
-              child: ElevatedButton(
-                onPressed: () {
-                  final ex = _flatFlow[_currentStepIndex];
-                  _logSet(ex);
-                  
-                  player.completeSet(ex.restSeconds);
-                  setState(() {
-                    _currentStepIndex++;
-                  });
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(40)),
-                ),
-                child: const Text("DONE", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
+            ElevatedButton.icon(
+              onPressed: () async {
+                final ex = _flatFlow[_currentStepIndex];
+                await _logSet(ex);
+                
+                player.completeSet(ex.restSeconds);
+                setState(() {
+                  _currentStepIndex++;
+                });
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
               ),
+              icon: const Icon(Icons.check, size: 20),
+              label: const Text("DONE", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             ),
         ],
       ),
@@ -693,7 +932,7 @@ class _ExerciseCardState extends State<ExerciseCard> {
     
     if (!mounted) return;
 
-    if (connectivityResult.contains(ConnectivityResult.none)) {
+    if (connectivityResult == ConnectivityResult.none) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Offline.")));
       return;
     }

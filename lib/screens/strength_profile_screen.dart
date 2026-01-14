@@ -15,6 +15,7 @@ class StrengthProfileScreen extends StatefulWidget {
 
 class _StrengthProfileScreenState extends State<StrengthProfileScreen> {
   Map<String, double> _latestMaxes = {};
+  Map<String, double> _targetWeights = {};
   String? _expandedExercise;
   bool _isMetric = false;
   bool _isLoading = true;
@@ -32,11 +33,13 @@ class _StrengthProfileScreenState extends State<StrengthProfileScreen> {
     
     final unitSystem = prefs.getString('units') ?? 'Imperial';
     final data = await db.getLatestOneRepMaxes();
+    final targets = await db.getTargetWeights();
 
     if (mounted) {
       setState(() {
         _isMetric = unitSystem == 'Metric';
         _latestMaxes = data;
+        _targetWeights = targets;
         _isLoading = false;
       });
     }
@@ -48,6 +51,49 @@ class _StrengthProfileScreenState extends State<StrengthProfileScreen> {
       builder: (context) => const EditOneRepMaxDialog(exerciseName: "New Exercise")
     );
     _loadData();
+  }
+
+  Future<void> _sharePR(String name, double weight) async {
+    final db = context.read<DatabaseService>();
+    await db.highlightExerciseAsPr(name);
+    
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Shared $name PR (${weight.toInt()} lbs) to Feed!"))
+      );
+    }
+  }
+
+  void _showSetGoalDialog(String exercise) {
+    final controller = TextEditingController(
+      text: _targetWeights[exercise]?.toInt().toString() ?? ""
+    );
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text("Set Goal for $exercise"),
+        content: TextField(
+          controller: controller,
+          decoration: InputDecoration(labelText: "Target Weight (lbs)", hintText: "e.g. 225"),
+          keyboardType: TextInputType.number,
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
+          ElevatedButton(
+            onPressed: () async {
+              final w = double.tryParse(controller.text);
+              if (w != null) {
+                await context.read<DatabaseService>().setTargetWeight(exercise, w);
+                Navigator.pop(ctx);
+                _loadData();
+              }
+            },
+            child: const Text("Save Goal"),
+          )
+        ],
+      )
+    );
   }
 
   double _getDisplayWeight(double lbs) {
@@ -77,21 +123,61 @@ class _StrengthProfileScreenState extends State<StrengthProfileScreen> {
               final name = exercises[index];
               final weightLbs = _latestMaxes[name] ?? 0.0;
               final displayWeight = _getDisplayWeight(weightLbs);
+              final targetLbs = _targetWeights[name];
+              final reachedGoal = targetLbs != null && weightLbs >= targetLbs;
 
               return Card(
                 margin: const EdgeInsets.only(bottom: 12),
                 child: ExpansionTile(
                   key: Key(name),
                   initiallyExpanded: name == _expandedExercise,
-                  title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                  trailing: Text(
-                    "${displayWeight.toInt()} $unitLabel", 
-                    style: const TextStyle(fontSize: 18, color: Colors.blueAccent, fontWeight: FontWeight.bold)
+                  title: Row(
+                    children: [
+                      Expanded(child: Text(name, style: const TextStyle(fontWeight: FontWeight.bold))),
+                      if (reachedGoal) const Icon(Icons.check_circle, color: Colors.green, size: 16),
+                    ],
+                  ),
+                  subtitle: targetLbs != null 
+                    ? LinearProgressIndicator(
+                        value: (weightLbs / targetLbs).clamp(0, 1),
+                        backgroundColor: Colors.grey.shade200,
+                        color: reachedGoal ? Colors.green : Colors.blueAccent,
+                      )
+                    : null,
+                  trailing: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        "${displayWeight.toInt()} $unitLabel", 
+                        style: TextStyle(fontSize: 16, color: reachedGoal ? Colors.green : Colors.blueAccent, fontWeight: FontWeight.bold)
+                      ),
+                      if (targetLbs != null) 
+                        Text("Goal: ${_getDisplayWeight(targetLbs).toInt()}", style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                    ],
                   ),
                   children: [
                     SizedBox(
                       height: 200,
                       child: _HistoryChart(exerciseName: name, isMetric: _isMetric),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          TextButton.icon(
+                            onPressed: () => _showSetGoalDialog(name),
+                            icon: const Icon(Icons.track_changes, size: 16),
+                            label: Text(targetLbs == null ? "Set Goal" : "Change Goal"),
+                          ),
+                          TextButton.icon(
+                            onPressed: () => _sharePR(name, weightLbs),
+                            icon: const Icon(Icons.share, size: 16),
+                            label: const Text("Share to Feed"),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),

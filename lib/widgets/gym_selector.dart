@@ -95,18 +95,23 @@ class GymSelector extends StatelessWidget {
                 ),
                 title: Text(gym.displayName, style: TextStyle(fontWeight: gym.id == activeId ? FontWeight.bold : FontWeight.normal)),
                 subtitle: gym.isShared ? const Text("Shared Gym") : null,
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (!gym.isShared)
-                      IconButton(
-                        icon: const Icon(Icons.person_add, color: Colors.blueAccent),
-                        tooltip: "Invite Friend",
-                        onPressed: () => _inviteFriend(context, gym),
-                      ),
-                    if (gym.isDefault) const Chip(label: Text("Default", style: TextStyle(fontSize: 10))),
-                  ],
-                ),
+                trailing: PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert),
+                  onSelected: (val) {
+                    if (val == 'default') db.setGymDefault(gym.id);
+                    if (val == 'rename') _showRenameDialog(context, gym, db);
+                    if (val == 'invite') _inviteFriend(context, gym);
+                    if (val == 'delete') _showDeleteConfirm(context, gym, db);
+                  },
+                itemBuilder: (ctx) => [
+                  if (!gym.isDefault)
+                    const PopupMenuItem(value: 'default', child: ListTile(leading: Icon(Icons.star_border), title: Text("Set as Default"))),
+                  const PopupMenuItem(value: 'rename', child: ListTile(leading: Icon(Icons.edit), title: Text("Rename"))),
+                  if (!gym.isShared)
+                    const PopupMenuItem(value: 'invite', child: ListTile(leading: Icon(Icons.person_add), title: Text("Invite Friend"))),
+                  const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete, color: Colors.red), title: Text("Delete", style: TextStyle(color: Colors.red)))),
+                ],
+              ),
                 onTap: () {
                   db.setCurrentGym(gym.id);
                   Navigator.pop(ctx);
@@ -168,6 +173,55 @@ class GymSelector extends StatelessWidget {
               }
             },
             child: const Text("Create"),
+          )
+        ],
+      ),
+    );
+  }
+
+  void _showRenameDialog(BuildContext context, GymProfile gym, DatabaseService db) {
+    final controller = TextEditingController(text: gym.name);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Rename Gym"),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: "New Name"),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
+          ElevatedButton(
+            onPressed: () async {
+              if (controller.text.isNotEmpty) {
+                await db.updateGymName(gym.id, controller.text);
+                if (ctx.mounted) Navigator.pop(ctx);
+              }
+            },
+            child: const Text("Save"),
+          )
+        ],
+      ),
+    );
+  }
+
+  void _showDeleteConfirm(BuildContext context, GymProfile gym, DatabaseService db) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Delete Gym Profile?"),
+        content: Text("Are you sure you want to delete '${gym.displayName}'? This cannot be undone."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            onPressed: () async {
+              await db.deleteGymProfile(gym.id);
+              if (ctx.mounted) Navigator.pop(ctx);
+              if (context.mounted) Navigator.pop(context); // Close bottom sheet
+            },
+            child: const Text("Delete"),
           )
         ],
       ),

@@ -7,6 +7,7 @@ import '../services/social_service.dart';
 import '../services/database_service.dart';
 import '../services/auth_service.dart';
 import '../models/plan.dart';
+import 'workout_player_screen.dart'; // NEW for joining versus flow
 
 class InboxScreen extends StatefulWidget {
   const InboxScreen({super.key});
@@ -106,6 +107,47 @@ class _InboxScreenState extends State<InboxScreen> {
     }
   }
 
+  Future<void> _handleAcceptVersus(String notificationId, Map<String, dynamic> payload) async {
+    final roomId = payload['room_id'];
+    if (roomId == null) return;
+
+    try {
+      await context.read<SocialService>().markNotificationRead(notificationId);
+      if (mounted) {
+        Navigator.push(context, MaterialPageRoute(builder: (_) => WorkoutPlayerScreen(versusRoomId: roomId)));
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Challenge Error: $e")));
+    }
+  }
+
+  Future<void> _handleAcceptFriendRequest(String notificationId, Map<String, dynamic> payload) async {
+    final senderId = payload['sender_id'];
+    final myId = context.read<AuthService>().user!.id;
+    
+    try {
+      // 1. Find the friendship row
+      final response = await Supabase.instance.client
+          .from('friendships')
+          .select()
+          .eq('requester_id', senderId)
+          .eq('receiver_id', myId)
+          .eq('status', 'pending')
+          .maybeSingle();
+      
+      if (response != null) {
+        await context.read<SocialService>().acceptRequest(response['id']);
+        await context.read<SocialService>().markNotificationRead(notificationId);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Friend Request Accepted!")));
+          _fetchInbox();
+        }
+      }
+    } catch (e) {
+       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+    }
+  }
+
   Future<void> _deleteNotif(String id) async {
     await context.read<SocialService>().deleteNotification(id);
     _fetchInbox();
@@ -149,6 +191,34 @@ class _InboxScreenState extends State<InboxScreen> {
             action = ElevatedButton(
               onPressed: () => _handleImportPlan(notif['id'], payload),
               child: const Text("Import"),
+            );
+          } else if (type == 'versus_invite') {
+            icon = Icons.bolt;
+            color = Colors.orange;
+            title = "Versus Challenge";
+            subtitle = "${payload['inviter_name']} challenged you to a live battle!";
+            action = ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white),
+              onPressed: () => _handleAcceptVersus(notif['id'], payload),
+              child: const Text("Join"),
+            );
+          } else if (type == 'friend_request') {
+            icon = Icons.person_add;
+            color = Colors.blue;
+            title = "Friend Request";
+            subtitle = "${payload['sender_name']} wants to be your friend.";
+            action = ElevatedButton(
+              onPressed: () => _handleAcceptFriendRequest(notif['id'], payload),
+              child: const Text("Accept"),
+            );
+          } else if (type == 'nudge') {
+            icon = Icons.notifications_active;
+            color = Colors.deepPurple;
+            title = "Gym Nudge!";
+            subtitle = "${payload['sender_name']} ${payload['message']}";
+            action = IconButton(
+              icon: const Icon(Icons.check),
+              onPressed: () => context.read<SocialService>().markNotificationRead(notif['id']).then((_) => _fetchInbox()),
             );
           }
 

@@ -9,6 +9,7 @@ import '../services/database_service.dart';
 import '../services/social_service.dart';
 import '../models/plan.dart';
 import 'inbox_screen.dart'; // Import Inbox
+import 'workout_player_screen.dart'; // NEW FOR CHALLENGE flow
 
 class SocialDashboardScreen extends StatefulWidget {
   const SocialDashboardScreen({super.key});
@@ -142,26 +143,44 @@ class _SocialDashboardScreenState extends State<SocialDashboardScreen> with Sing
         itemCount: _activityFeed.length,
         itemBuilder: (ctx, i) {
           final log = _activityFeed[i];
-          final profile = log['profiles'] ?? {};
-          final username = profile['username'] ?? 'Unknown';
+          final username = log['username'] ?? 'Unknown';
           final exercise = log['exercise_name'] ?? 'Exercise';
           final weight = log['weight'];
           final reps = log['reps'];
           final rpe = log['rpe'];
-          final time = DateTime.tryParse(log['timestamp'] ?? '') ?? DateTime.now();
+          final isPr = log['is_pr'] == true; // FROM SQL
+          final time = DateTime.tryParse(log['log_timestamp'] ?? '') ?? DateTime.now();
 
           return Card(
             margin: const EdgeInsets.only(bottom: 12),
+            shape: isPr ? RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: const BorderSide(color: Colors.amber, width: 2)
+            ) : null,
             child: Padding(
               padding: const EdgeInsets.all(12.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
+                   Row(
                     children: [
                       CircleAvatar(radius: 16, child: Text(username.isNotEmpty ? username[0].toUpperCase() : "?", style: const TextStyle(fontSize: 12))),
                       const SizedBox(width: 8),
                       Text(username, style: const TextStyle(fontWeight: FontWeight.bold)),
+                      if (isPr) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(color: Colors.amber, borderRadius: BorderRadius.circular(4)),
+                          child: const Row(
+                            children: [
+                              Icon(Icons.whatshot, size: 12, color: Colors.white),
+                              SizedBox(width: 2),
+                              Text("PR", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10)),
+                            ],
+                          ),
+                        ),
+                      ],
                       const Spacer(),
                       Text(DateFormat('MMM d').format(time), style: const TextStyle(color: Colors.grey, fontSize: 12)),
                     ],
@@ -180,6 +199,25 @@ class _SocialDashboardScreenState extends State<SocialDashboardScreen> with Sing
                       ]
                     ],
                   ),
+                  if (isPr) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(color: Colors.blueGrey.shade900, borderRadius: BorderRadius.circular(8)),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.auto_awesome, color: Colors.amber, size: 16),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              "COACH'S ALERT: Incredible work! $username just hit a lifetime max on $exercise.",
+                              style: const TextStyle(color: Colors.white, fontSize: 12, fontStyle: FontStyle.italic),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   const Divider(height: 24),
                   Row(
                     children: [
@@ -187,16 +225,16 @@ class _SocialDashboardScreenState extends State<SocialDashboardScreen> with Sing
                         icon: const Icon(Icons.thumb_up_alt_outlined, size: 20),
                         onPressed: () async {
                            await context.read<SocialService>().toggleLike(log['id']);
-                           _fetchActivity(); // Refresh to show counts if possible
+                           _fetchActivity(); 
                         },
                       ),
-                      const Text("Like"),
+                      Text("${log['likes_count'] ?? 0}"),
                       const SizedBox(width: 24),
                       IconButton(
                         icon: const Icon(Icons.comment_outlined, size: 20),
                         onPressed: () => _showCommentsSheet(log['id']),
                       ),
-                      const Text("Comment"),
+                      Text("${log['comments_count'] ?? 0}"),
                     ],
                   )
                 ],
@@ -298,16 +336,50 @@ class _SocialDashboardScreenState extends State<SocialDashboardScreen> with Sing
             
             ..._friends.map((f) {
               final fName = f['username'] ?? "Unknown";
+              final fId = f['friend_id'];
+              final lastSeenStr = f['last_seen'] as String?;
+              final lastSeen = lastSeenStr != null ? DateTime.tryParse(lastSeenStr) : null;
+              final isInactive = lastSeen == null || DateTime.now().difference(lastSeen).inDays >= 3;
+
               return Card(
                 child: ListTile(
                   leading: CircleAvatar(child: Text(fName.isNotEmpty ? fName[0].toUpperCase() : "?")),
                   title: Text(fName),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.person_remove, color: Colors.grey),
-                    onPressed: () async {
-                      await context.read<SocialService>().deleteFriendship(f['friendship_id']);
-                      _fetchPeopleData();
-                    },
+                  subtitle: lastSeen != null 
+                    ? Text("Last active: ${DateFormat('MMM d').format(lastSeen)}", style: TextStyle(fontSize: 10, color: isInactive ? Colors.orange : Colors.grey))
+                    : const Text("New Friend", style: TextStyle(fontSize: 10)),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (isInactive)
+                        IconButton(
+                          icon: const Icon(Icons.notifications_active, color: Colors.orange),
+                          tooltip: "Send Nudge",
+                          onPressed: () async {
+                            await context.read<SocialService>().sendNudge(fId);
+                            if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Nudged $fName!")));
+                          },
+                        ),
+                      IconButton(
+                        icon: const Icon(Icons.bolt, color: Colors.blue),
+                        tooltip: "Challenge (Versus)",
+                        onPressed: () async {
+                          final roomId = const Uuid().v4();
+                          await context.read<SocialService>().sendVersusInvite(fId, roomId);
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Challenge Sent! Starting your session...")));
+                             Navigator.push(context, MaterialPageRoute(builder: (_) => WorkoutPlayerScreen(versusRoomId: roomId)));
+                          }
+                        },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.person_remove, color: Colors.grey),
+                        onPressed: () async {
+                          await context.read<SocialService>().deleteFriendship(f['friendship_id']);
+                          _fetchPeopleData();
+                        },
+                      ),
+                    ],
                   ),
                 ),
               );

@@ -9,6 +9,7 @@ class LogEntry {
   final String timestamp;
   final String? sessionId;
   final double? rpe; // NEW: Rate of Perceived Exertion
+  final bool isPr; // NEW: Flag for PRs
 
   LogEntry({
     required this.id,
@@ -21,6 +22,7 @@ class LogEntry {
     required this.timestamp,
     this.sessionId,
     this.rpe,
+    this.isPr = false,
   });
 
   Map<String, dynamic> toMap() {
@@ -35,6 +37,7 @@ class LogEntry {
       'timestamp': timestamp,
       'session_id': sessionId,
       'rpe': rpe,
+      'is_pr': isPr ? 1 : 0,
     };
   }
 
@@ -50,6 +53,7 @@ class LogEntry {
       timestamp: map['timestamp'],
       sessionId: map['session_id'],
       rpe: map['rpe']?.toDouble(),
+      isPr: map['is_pr'] == 1,
     );
   }
 }

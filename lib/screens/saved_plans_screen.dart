@@ -10,6 +10,7 @@ import '../models/plan.dart';
 import '../models/session.dart';
 import '../models/log.dart';
 import 'workout_player_screen.dart';
+import 'machine_entry_screen.dart'; // NEW
 import 'manual_plan_creator_screen.dart';
 
 class SavedPlansScreen extends StatefulWidget {
@@ -84,22 +85,29 @@ class _SavedPlansScreenState extends State<SavedPlansScreen> {
                     ],
                   ),
                   children: [
-                    ...plan.days.map((day) => ExpansionTile(
-                      title: Text(day.name),
-                      leading: const Icon(Icons.calendar_today, size: 20),
-                      children: [
-                        // The "Time Machine" View
-                        PlanDayHistoryView(
-                          planId: plan.id, 
-                          day: day,
-                          isHiit: plan.type == 'HIIT',
-                          onSessionComplete: () {
-                            // Trigger full rebuild to refresh history
-                            setState(() {}); 
-                          },
-                        ),
-                      ],
-                    )),
+                    ...plan.days.map((day) {
+                      return FutureBuilder<List<WorkoutSession>>(
+                        future: db.getSessionsForPlanDay(plan.id, day.name),
+                        builder: (context, sessionSnap) {
+                          final lastSession = (sessionSnap.data?.isNotEmpty ?? false) ? sessionSnap.data!.first : null;
+                          final lastStr = lastSession != null ? "Last: ${DateFormat('MMM d').format(lastSession.startTime)}" : "Never";
+
+                          return ExpansionTile(
+                            title: Text(day.name),
+                            subtitle: Text(lastStr, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                            leading: const Icon(Icons.calendar_today, size: 20),
+                            children: [
+                              PlanDayHistoryView(
+                                planId: plan.id, 
+                                day: day,
+                                isHiit: plan.type == 'HIIT',
+                                onSessionComplete: () => setState(() {}),
+                              ),
+                            ],
+                          );
+                        }
+                      );
+                    }),
                   ],
                 ),
               );
@@ -285,9 +293,10 @@ class _PlanDayHistoryViewState extends State<PlanDayHistoryView> {
       setState(() {
         _sessions = sessions;
         _isLoading = false;
-        // Default to "New Session" (-1)
-        _viewIndex = -1; 
+        // Default to Latest History (0) if it exists, otherwise New Session (-1)
+        _viewIndex = sessions.isNotEmpty ? 0 : -1; 
       });
+      if (_viewIndex == 0) _loadLogsForSession(sessions[0].id);
     }
   }
 

@@ -43,12 +43,16 @@ class _AICoachScreenState extends State<AICoachScreen> {
     final logs = await db.getHistory();
     final logsStr = logs.take(10).map((l) => "${l.timestamp.substring(0,10)}: ${l.exerciseName} ${l.weight}x${l.reps} (RPE: ${l.rpe ?? 'N/A'})").join('\n');
 
+    // 5. Volume Trends
+    final trendsStr = await db.getVolumeTrends();
+
     setState(() {
       _contextData = {
         'profile': profileStr,
         'equipment': equipStr,
         'strength_stats': statsStr,
         'recent_logs': logsStr,
+        'volume_trends': trendsStr,
       };
       
       // Initial Greeting

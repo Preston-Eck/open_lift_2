@@ -20,6 +20,7 @@ import 'services/workout_player_service.dart';
 import 'services/notification_service.dart'; // NEW
 import 'theme.dart';
 import 'screens/home_screen.dart'; 
+import 'screens/splash_screen.dart'; // NEW
 
 Future<void> main() async {
   runZonedGuarded(() async {
@@ -28,10 +29,18 @@ Future<void> main() async {
     
     // Initialize Firebase
     try {
-      await Firebase.initializeApp();
+      if (kIsWeb) {
+        // On Web, Firebase.initializeApp() requires options. 
+        // If they are missing, we skip.
+        debugPrint("🌐 Checking Firebase Web Config...");
+        // We catch the error specifically if options are null
+        await Firebase.initializeApp(); 
+      } else {
+        await Firebase.initializeApp();
+      }
       debugPrint("✅ Firebase Initialized");
     } catch (e) {
-      debugPrint("⚠️ Firebase Init Failed (likely missing config): $e");
+      debugPrint("⚠️ Firebase Init Skipped/Failed: $e");
     }
 
     debugPrint("✅ Widgets Binding Initialized");
@@ -140,9 +149,13 @@ class _MyAppState extends State<MyApp> {
       final auth = context.read<AuthService>();
       
       await notifs.init();
-      final token = await notifs.getToken();
-      if (token != null) {
-        await auth.updateFcmToken(token);
+      try {
+        final token = await notifs.getToken();
+        if (token != null) {
+          await auth.updateFcmToken(token);
+        }
+      } catch (e) {
+        debugPrint("⚠️ Could not get FCM token: $e");
       }
     });
   }
@@ -152,7 +165,7 @@ class _MyAppState extends State<MyApp> {
     return MaterialApp(
       title: 'OpenLift 2.0',
       theme: AppTheme.lightTheme,
-      home: const HomeScreen(), 
+      home: const SplashScreen(), // Changed for loading movement
       debugShowCheckedModeBanner: false,
     );
   }

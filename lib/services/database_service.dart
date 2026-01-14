@@ -53,22 +53,25 @@ class DatabaseService extends ChangeNotifier {
 
         return await openDatabase(
           path,
-          version: 20,
+          version: 22,
           onCreate: (db, version) async {
             await _createTables(db);
             await _createProfileTable(db);
             
-            // ✅ NEW: Initialize default gym for fresh installs
-            final defaultGymId = const Uuid().v4();
-            await db.insert('gym_profiles', {
-              'id': defaultGymId,
-              'name': 'Main Gym',
-              'is_default': 1,
-              'created_at': DateTime.now().toIso8601String(),
-              'owner_id': _currentUserId ?? 'guest',
-              'last_updated': DateTime.now().toIso8601String(),
-              'synced': 0,
-            });
+            // ✅ Only create 'Main Gym' for Guest users on initialization.
+            // Logged-in users will pull their gyms from Sync.
+            if (_currentUserId == null) {
+              final defaultGymId = const Uuid().v4();
+              await db.insert('gym_profiles', {
+                'id': defaultGymId,
+                'name': 'Main Gym',
+                'is_default': 1,
+                'created_at': DateTime.now().toIso8601String(),
+                'owner_id': 'guest',
+                'last_updated': DateTime.now().toIso8601String(),
+                'synced': 0,
+              });
+            }
           },
           onOpen: (db) async {        await _cleanupGhostSessions(db);
       },
@@ -163,18 +166,40 @@ class DatabaseService extends ChangeNotifier {
              await db.execute('UPDATE workout_plans SET synced = 1');
            } catch (_) {}
         }
+        if (oldVersion < 21) {
+           debugPrint("⚡ Migrating to v21: PR Tracking...");
+           try {
+             await db.execute('ALTER TABLE workout_logs ADD COLUMN is_pr INTEGER DEFAULT 0');
+           } catch (_) {}
+        }
+        if (oldVersion < 22) {
+           debugPrint("⚡ Migrating to v22: Goal Setting...");
+           try {
+             await db.execute('ALTER TABLE exercise_stats ADD COLUMN target_weight REAL');
+           } catch (_) {}
+        }
       }
     );
   }
 
   Future<void> _createTables(Database db) async {
     await db.execute('CREATE TABLE user_equipment (id TEXT PRIMARY KEY, name TEXT, is_owned INTEGER, capabilities_json TEXT, last_updated TEXT, synced INTEGER DEFAULT 0, deleted_at TEXT)');
-    await db.execute('CREATE TABLE workout_logs (id TEXT PRIMARY KEY, exercise_id TEXT, exercise_name TEXT, weight REAL, reps INTEGER, volume_load REAL, duration INTEGER, timestamp TEXT, session_id TEXT, last_updated TEXT, synced INTEGER DEFAULT 0, deleted_at TEXT, rpe REAL)');
+    await db.execute('CREATE TABLE workout_logs (id TEXT PRIMARY KEY, exercise_id TEXT, exercise_name TEXT, weight REAL, reps INTEGER, volume_load REAL, duration INTEGER, timestamp TEXT, session_id TEXT, last_updated TEXT, synced INTEGER DEFAULT 0, deleted_at TEXT, rpe REAL, is_pr INTEGER DEFAULT 0)');
     await db.execute('CREATE TABLE workout_plans (id TEXT PRIMARY KEY, name TEXT, goal TEXT, type TEXT, schedule_json TEXT, last_updated TEXT, synced INTEGER DEFAULT 0, deleted_at TEXT)');
-    await db.execute('CREATE TABLE exercise_stats (exercise_name TEXT PRIMARY KEY, one_rep_max REAL, last_updated TEXT)');
+    await db.execute('CREATE TABLE exercise_stats (exercise_name TEXT PRIMARY KEY, one_rep_max REAL, last_updated TEXT, target_weight REAL)');
     await db.execute('CREATE TABLE body_metrics (id TEXT PRIMARY KEY, date TEXT, weight REAL, measurements_json TEXT)');
     await db.execute('CREATE TABLE one_rep_max_history (id TEXT PRIMARY KEY, exercise_name TEXT, weight REAL, date TEXT)');
     await db.execute('CREATE TABLE custom_exercises (id TEXT PRIMARY KEY, name TEXT, category TEXT, primary_muscles TEXT, notes TEXT, equipment_json TEXT, last_updated TEXT, synced INTEGER DEFAULT 0, deleted_at TEXT)');
+    await db.execute("""
+      CREATE TABLE active_sessions (
+        id TEXT PRIMARY KEY,
+        plan_id TEXT,
+        day_name TEXT,
+        step_index INTEGER,
+        start_time TEXT,
+        data_json TEXT
+      )
+    """);
     await db.execute('CREATE TABLE workout_sessions (id TEXT PRIMARY KEY, plan_id TEXT, day_name TEXT, start_time TEXT, end_time TEXT, note TEXT)');
     await db.execute('CREATE TABLE exercise_aliases (original_name TEXT PRIMARY KEY, alias TEXT)');
     
@@ -236,6 +261,18 @@ class DatabaseService extends ChangeNotifier {
     return id;
   }
 
+  Future<void> ensureGymExists() async {
+    if (_currentUserId == null) return;
+    final gyms = await getGymProfiles();
+    if (gyms.isEmpty) {
+      await createGymProfile("Main Gym");
+      // Mark as default since it's the only one
+      final db = await database;
+      await db.update('gym_profiles', {'is_default': 1}, where: 'owner_id = ?', whereArgs: [_currentUserId]);
+      notifyListeners();
+    }
+  }
+
   Future<void> updateGymName(String gymId, String newName) async {
     final db = await database;
     final gym = await db.query('gym_profiles', where: 'id = ?', whereArgs: [gymId]);
@@ -265,12 +302,34 @@ class DatabaseService extends ChangeNotifier {
         'synced': 0
       }, where: 'id = ?', whereArgs: [id]);
       
-      // We keep gym_equipment and gym_members for now; 
-      // typically we'd only sync the profiles tombstone.
+      // If we deleted the current gym, we should reset currentGymId to trigger a fallback
+      if (_currentGymId == id) {
+        _currentGymId = null;
+      }
     } else {
       // Member leaving a gym - this is a local action on membership
       await db.delete('gym_members', where: 'gym_id = ? AND user_id = ?', whereArgs: [id, _currentUserId]);
+      if (_currentGymId == id) {
+        _currentGymId = null;
+      }
     }
+    notifyListeners();
+  }
+
+  Future<void> setGymDefault(String gymId) async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String();
+    await db.transaction((txn) async {
+       // Reset all to non-default
+       await txn.update('gym_profiles', 
+        {'is_default': 0, 'synced': 0, 'last_updated': now}, 
+        where: 'owner_id = ?', whereArgs: [_currentUserId]);
+       
+       // Set highligted one as default
+       await txn.update('gym_profiles', 
+        {'is_default': 1, 'synced': 0, 'last_updated': now}, 
+        where: 'id = ?', whereArgs: [gymId]);
+    });
     notifyListeners();
   }
 
@@ -296,15 +355,34 @@ class DatabaseService extends ChangeNotifier {
     ''', [targetGymId]);
     final Set<String> capabilities = {};
     for (var row in res) {
-      capabilities.add(row['name'] as String);
+      final name = row['name'] as String;
+      capabilities.add(name);
       if (row['capabilities_json'] != null) {
         try {
           final List<dynamic> tags = jsonDecode(row['capabilities_json'] as String);
-          capabilities.addAll(tags.map((e) => e.toString()));
+          for (var tag in tags) {
+             final tagStr = tag.toString();
+             // Only add if it's a generic equipment tag or matching the machine name
+             // This filters out specific exercise names linked to machines
+             if (tagStr == name || _isGenericEquipment(tagStr)) {
+               capabilities.add(tagStr);
+             }
+          }
         } catch (_) {} 
       }
     }
     return capabilities.toList();
+  }
+
+  bool _isGenericEquipment(String tag) {
+    // We maintain a list of standard tags to avoid showing specific exercises as equipment chips
+    const standards = [
+      "Barbell", "Dumbbell", "Kettlebell", "Cable", "Machine", "Smith Machine", 
+      "Band", "Bodyweight", "Bench", "Pull-up Bar", "Dip Station", "Landmine", 
+      "EZ Bar", "Trap Bar", "Sled", "Medicine Ball", "Stability Ball", "Foam Roller", 
+      "Rack", "Plate", "Box", "Chain"
+    ];
+    return standards.contains(tag);
   }
 
   Future<List<String>> getGymItemIds(String gymId) async {
@@ -324,40 +402,73 @@ class DatabaseService extends ChangeNotifier {
       'last_updated': DateTime.now().toIso8601String(),
       'synced': 0
     }, where: 'id = ?', whereArgs: [gymId]);
-    if (isEnabled) await updateEquipment(equipmentId, true);
+    if (isEnabled) await updateIsOwned(equipmentId, true);
     notifyListeners();
   }
 
-  Future<void> updateEquipment(String name, bool isOwned) async {
+  Future<void> updateIsOwned(String id, bool isOwned) async {
     final db = await database;
     final now = DateTime.now().toIso8601String();
-    final existing = await db.query('user_equipment', where: 'id = ?', whereArgs: [name]);
+    final existing = await db.query('user_equipment', where: 'id = ?', whereArgs: [id]);
     if (existing.isNotEmpty) {
       await db.update('user_equipment', {
         'is_owned': isOwned ? 1 : 0, 
         'last_updated': now, 
         'synced': 0,
-        'deleted_at': null, // Undelete if reactivated
-      }, where: 'id = ?', whereArgs: [name]);
+        'deleted_at': isOwned ? null : now, 
+      }, where: 'id = ?', whereArgs: [id]);
     } else {
+      // For standard items, id == name
       await db.insert('user_equipment', {
-        'id': name, 
-        'name': name, 
+        'id': id, 
+        'name': id, 
         'is_owned': isOwned ? 1 : 0, 
-        'capabilities_json': jsonEncode([name]), 
+        'capabilities_json': jsonEncode([id]), 
         'last_updated': now, 
         'synced': 0,
-        'deleted_at': null
+        'deleted_at': isOwned ? null : now
       });
     }
     notifyListeners();
   }
 
-  Future<void> updateEquipmentCapabilities(String name, List<String> capabilities) async {
+  Future<void> updateEquipmentCapabilities(String id, List<String> capabilities) async {
      final db = await database;
      final now = DateTime.now().toIso8601String();
-     await db.update('user_equipment', {'capabilities_json': jsonEncode(capabilities), 'last_updated': now, 'synced': 0}, where: 'id = ?', whereArgs: [name]);
+     await db.update('user_equipment', {'capabilities_json': jsonEncode(capabilities), 'last_updated': now, 'synced': 0}, where: 'id = ?', whereArgs: [id]);
      notifyListeners();
+  }
+
+  Future<void> saveCustomEquipment({String? id, required String name, required List<String> capabilities}) async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String();
+    
+    if (id != null) {
+      // Update existing
+      await db.update('user_equipment', {
+        'name': name,
+        'capabilities_json': jsonEncode(capabilities),
+        'last_updated': now,
+        'synced': 0
+      }, where: 'id = ?', whereArgs: [id]);
+    } else {
+      // Create new
+      final newId = const Uuid().v4();
+      await db.insert('user_equipment', {
+        'id': newId,
+        'name': name,
+        'is_owned': 1,
+        'capabilities_json': jsonEncode(capabilities),
+        'last_updated': now,
+        'synced': 0,
+        'deleted_at': null
+      });
+      // Also enable it for the current gym by default
+      if (_currentGymId != null) {
+        await toggleGymEquipment(_currentGymId!, newId, true);
+      }
+    }
+    notifyListeners();
   }
 
   Future<List<String>> getOwnedEquipment() async => getActiveEquipment();
@@ -485,18 +596,55 @@ class DatabaseService extends ChangeNotifier {
 
   // Logs
   Future<void> startSession(WorkoutSession s) async { final db = await database; await db.insert('workout_sessions', {'id': s.id, 'plan_id': s.planId, 'day_name': s.dayName, 'start_time': s.startTime.toIso8601String()}); notifyListeners(); }
-  Future<void> endSession(String id, DateTime end) async { final db = await database; await db.update('workout_sessions', {'end_time': end.toIso8601String()}, where: 'id = ?', whereArgs: [id]); notifyListeners(); }
+  Future<void> endSession(String id, DateTime end) async { 
+    final db = await database; 
+    await db.update('workout_sessions', {'end_time': end.toIso8601String()}, where: 'id = ?', whereArgs: [id]); 
+    await db.delete('active_sessions'); // Clear any paused session
+    notifyListeners(); 
+  }
+
+  // Active Session Persistence
+  Future<void> pauseSession(String id, String planId, String dayName, int stepIndex, Map<String, dynamic> data) async {
+    final db = await database;
+    await db.delete('active_sessions'); // Only one active session at a time
+    await db.insert('active_sessions', {
+      'id': id,
+      'plan_id': planId,
+      'day_name': dayName,
+      'step_index': stepIndex,
+      'start_time': DateTime.now().toIso8601String(),
+      'data_json': jsonEncode(data)
+    });
+    notifyListeners();
+  }
+
+  Future<Map<String, dynamic>?> getActiveSession() async {
+    final db = await database;
+    final res = await db.query('active_sessions', limit: 1);
+    return res.isNotEmpty ? res.first : null;
+  }
+
+  Future<void> discardActiveSession() async {
+    final db = await database;
+    await db.delete('active_sessions');
+    notifyListeners();
+  }
   Future<bool> logSet(LogEntry log) async {
     final db = await database;
     final now = DateTime.now().toIso8601String();
+    
+    // Calculate new PR status
+    final currentMaxEst = log.weight * (1 + (log.reps / 30));
+    final isPr = await _checkAndUpdateOneRepMax(log.exerciseName, currentMaxEst);
+
     await db.insert('workout_logs', {
       'id': log.id, 'session_id': log.sessionId, 'exercise_id': log.exerciseId, 
       'exercise_name': log.exerciseName, 'weight': log.weight, 'reps': log.reps, 
       'volume_load': log.volumeLoad, 'duration': log.duration, 'timestamp': log.timestamp, 
-      'last_updated': now, 'synced': 0, 'deleted_at': null, 'rpe': log.rpe
+      'last_updated': now, 'synced': 0, 'deleted_at': null, 'rpe': log.rpe,
+      'is_pr': isPr ? 1 : 0
     }, conflictAlgorithm: ConflictAlgorithm.replace);
-    final max = log.weight * (1 + (log.reps / 30));
-    final isPr = await _checkAndUpdateOneRepMax(log.exerciseName, max);
+    
     notifyListeners();
     return isPr;
   }
@@ -518,6 +666,16 @@ class DatabaseService extends ChangeNotifier {
       whereArgs: [n], 
       orderBy: 'timestamp DESC'); 
     return res.map((e) => LogEntry.fromMap(e)).toList(); 
+  }
+  
+  Future<DateTime?> getLastWorkoutDate() async {
+    final db = await database;
+    final res = await db.query('workout_logs', 
+      where: 'deleted_at IS NULL', 
+      orderBy: 'timestamp DESC', 
+      limit: 1);
+    if (res.isEmpty) return null;
+    return DateTime.tryParse(res.first['timestamp'] as String);
   }
   Future<List<LogEntry>> searchHistory(String q) async { 
     final db = await database; 
@@ -548,10 +706,97 @@ class DatabaseService extends ChangeNotifier {
     }
     return false;
   }
+  Future<String> getVolumeTrends({int days = 30}) async {
+    final db = await database;
+    final cutoff = DateTime.now().subtract(Duration(days: days)).toIso8601String();
+    
+    // Get top 5 exercises by log count in that period
+    final topEx = await db.rawQuery('''
+      SELECT exercise_name, COUNT(*) as cnt 
+      FROM workout_logs 
+      WHERE timestamp > ? AND deleted_at IS NULL
+      GROUP BY exercise_name 
+      ORDER BY cnt DESC 
+      LIMIT 5
+    ''', [cutoff]);
+
+    if (topEx.isEmpty) return "No sufficient data for volume trends.";
+
+    List<String> trends = [];
+    for (var ex in topEx) {
+      final name = ex['exercise_name'] as String;
+      // Calculate average tonnage per week
+      final logs = await db.query('workout_logs', 
+        where: 'exercise_name = ? AND timestamp > ? AND deleted_at IS NULL',
+        whereArgs: [name, cutoff]);
+      
+      double totalVol = 0;
+      for (var l in logs) {
+        totalVol += (l['volume_load'] as num).toDouble();
+      }
+      final weeklyAvg = totalVol / (days / 7);
+      trends.add("$name: ${weeklyAvg.toInt()} lbs/week avg");
+    }
+    
+    return trends.join('\n');
+  }
   Future<void> addOneRepMax(String n, double w) async { final db = await database; final now = DateTime.now().toIso8601String(); await db.insert('exercise_stats', {'exercise_name': n, 'one_rep_max': w, 'last_updated': now}, conflictAlgorithm: ConflictAlgorithm.replace); await db.insert('one_rep_max_history', {'id': const Uuid().v4(), 'exercise_name': n, 'weight': w, 'date': now}); notifyListeners(); }
   Future<Map<String, double>> getLatestOneRepMaxes() async { final db = await database; final res = await db.query('exercise_stats'); Map<String, double> m = {}; for (var r in res) { m[r['exercise_name'] as String] = r['one_rep_max'] as double; } return m; }
+  
+  Future<Map<String, double>> getTargetWeights() async {
+    final db = await database;
+    final res = await db.query('exercise_stats');
+    Map<String, double> m = {};
+    for (var r in res) {
+      if (r['target_weight'] != null) {
+        m[r['exercise_name'] as String] = r['target_weight'] as double;
+      }
+    }
+    return m;
+  }
+
+  Future<void> setTargetWeight(String exerciseName, double weight) async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String();
+    // Use upsert approach
+    final existing = await db.query('exercise_stats', where: 'exercise_name = ?', whereArgs: [exerciseName]);
+    if (existing.isEmpty) {
+      await db.insert('exercise_stats', {
+        'exercise_name': exerciseName,
+        'one_rep_max': 0,
+        'target_weight': weight,
+        'last_updated': now
+      });
+    } else {
+      await db.update('exercise_stats', {
+        'target_weight': weight,
+        'last_updated': now
+      }, where: 'exercise_name = ?', whereArgs: [exerciseName]);
+    }
+    notifyListeners();
+  }
   Future<Map<String, dynamic>?> getLatestOneRepMaxDetailed(String n) async { final db = await database; final res = await db.query('one_rep_max_history', where: 'exercise_name = ?', whereArgs: [n], orderBy: 'date DESC', limit: 1); return res.isNotEmpty ? {'weight': res.first['weight'], 'date': res.first['date']} : null; }
   Future<List<Map<String, dynamic>>> getOneRepMaxHistory(String n) async { final db = await database; return await db.query('one_rep_max_history', where: 'exercise_name = ?', whereArgs: [n]); }
+  
+  Future<void> highlightExerciseAsPr(String exerciseName) async {
+    final db = await database;
+    // Find highest weight set for this exercise
+    final res = await db.query('workout_logs', 
+      where: 'exercise_name = ? AND deleted_at IS NULL', 
+      whereArgs: [exerciseName], 
+      orderBy: 'weight DESC', 
+      limit: 1);
+      
+    if (res.isNotEmpty) {
+      final logId = res.first['id'];
+      await db.update('workout_logs', {
+        'is_pr': 1,
+        'synced': 0,
+        'last_updated': DateTime.now().toIso8601String(),
+      }, where: 'id = ?', whereArgs: [logId]);
+      notifyListeners();
+    }
+  }
   
   // Body Metrics
   Future<void> logBodyMetric(BodyMetric m) async { final db = await database; await db.insert('body_metrics', {'id': m.id, 'date': m.date.toIso8601String(), 'weight': m.weight, 'measurements_json': jsonEncode(m.measurements)}, conflictAlgorithm: ConflictAlgorithm.replace); notifyListeners(); }

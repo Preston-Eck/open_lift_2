@@ -1,8 +1,10 @@
 import 'package:flutter/services.dart'; // For Clipboard
+import 'package:uuid/uuid.dart';
 
 // ... imports below
 import 'dart:convert';
-import 'dart:io';
+import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
@@ -17,7 +19,11 @@ import '../theme.dart';
 import '../widgets/exercise_selection_dialog.dart';
 import '../widgets/user_picker_dialog.dart'; // NEW
 import '../models/exercise.dart'; // NEW
+import '../widgets/exercise_selection_dialog.dart';
+import '../widgets/user_picker_dialog.dart'; // NEW
+import '../models/exercise.dart'; // NEW
 import '../services/social_service.dart'; // NEW
+import 'machine_entry_screen.dart'; // NEW: Smart Machine Creator
 
 class EquipmentManagerScreen extends StatefulWidget {
 // ... (rest of EquipmentManagerScreen remains the same)
@@ -210,9 +216,12 @@ class _EquipmentManagerScreenState extends State<EquipmentManagerScreen> with Si
   }
 
   void _openCustomEditor([Map<String, dynamic>? item]) async {
+    // Replaced ComplexEquipmentEditor with Smart Machine Creator (User Request)
+    // NOTE: MachineEntryScreen might need to accept 'item' for editing, 
+    // but for now we'll just open the new creator.
     await Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => ComplexEquipmentEditor(item: item)),
+      MaterialPageRoute(builder: (_) => const MachineEntryScreen()),
     );
     _loadData();
   }
@@ -378,7 +387,8 @@ class _ComplexEquipmentEditorState extends State<ComplexEquipmentEditor> {
   bool _isAnalyzing = false;
 
   // Vision State
-  File? _selectedFile;
+  Uint8List? _selectedData;
+  String? _selectedFileName;
   String? _mimeType;
 
   @override
@@ -404,20 +414,29 @@ class _ComplexEquipmentEditorState extends State<ComplexEquipmentEditor> {
     final picker = ImagePicker();
     final pickedFile = await picker.pickImage(source: source);
     if (pickedFile != null) {
-      // Compress Image
-      final targetPath = "${pickedFile.path}_compressed.jpg";
-      final result = await FlutterImageCompress.compressAndGetFile(
-        pickedFile.path,
-        targetPath,
-        quality: 50, // High compression for AI analysis
-      );
-
-      if (result != null) {
-        setState(() {
-          _selectedFile = File(result.path);
-          _mimeType = 'image/jpeg';
-        });
+      Uint8List bytes;
+      if (kIsWeb) {
+        bytes = await pickedFile.readAsBytes();
+      } else {
+        // Compress Image on Mobile
+        final targetPath = "${pickedFile.path}_compressed.jpg";
+        final result = await FlutterImageCompress.compressAndGetFile(
+          pickedFile.path,
+          targetPath,
+          quality: 50, 
+        );
+        if (result != null) {
+          bytes = await result.readAsBytes();
+        } else {
+          bytes = await pickedFile.readAsBytes();
+        }
       }
+
+      setState(() {
+        _selectedData = bytes;
+        _selectedFileName = pickedFile.name;
+        _mimeType = 'image/jpeg';
+      });
     }
   }
 
@@ -425,10 +444,12 @@ class _ComplexEquipmentEditorState extends State<ComplexEquipmentEditor> {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['pdf'],
+      withData: true, // Required for Web
     );
-    if (result != null && result.files.single.path != null) {
+    if (result != null) {
       setState(() {
-        _selectedFile = File(result.files.single.path!);
+        _selectedData = result.files.single.bytes;
+        _selectedFileName = result.files.single.name;
         _mimeType = 'application/pdf';
       });
     }
@@ -446,9 +467,8 @@ class _ComplexEquipmentEditorState extends State<ComplexEquipmentEditor> {
       final gemini = context.read<GeminiService>();
       List<DataPart>? mediaParts;
       
-      if (_selectedFile != null && _mimeType != null) {
-        final bytes = await _selectedFile!.readAsBytes();
-        mediaParts = [DataPart(_mimeType!, bytes)];
+      if (_selectedData != null && _mimeType != null) {
+        mediaParts = [DataPart(_mimeType!, _selectedData!)];
       }
 
       final result = await gemini.analyzeEquipmentVision(
@@ -500,19 +520,18 @@ class _ComplexEquipmentEditorState extends State<ComplexEquipmentEditor> {
     if (_nameController.text.isEmpty) return;
     final db = context.read<DatabaseService>();
     final sync = context.read<SyncService>();
-    
+
     final List<String> finalCapabilities = {
       ..._selectedCapabilities,
       ..._specificExercises,
       _nameController.text 
     }.toList();
 
-    await db.updateEquipmentCapabilities(_nameController.text, finalCapabilities);
-    
-    if (widget.item == null) {
-      final gymId = db.currentGymId;
-      if (gymId != null) await db.toggleGymEquipment(gymId, _nameController.text, true);
-    }
+    await db.saveCustomEquipment(
+      id: widget.item?['id'],
+      name: _nameController.text,
+      capabilities: finalCapabilities,
+    );
     
     sync.syncAll();
     if (mounted) Navigator.pop(context);
@@ -520,7 +539,7 @@ class _ComplexEquipmentEditorState extends State<ComplexEquipmentEditor> {
 
   Future<void> _delete() async {
     if (widget.item != null) {
-      await context.read<DatabaseService>().updateEquipment(widget.item!['name'], false);
+      await context.read<DatabaseService>().updateIsOwned(widget.item!['id'], false);
       if (mounted) context.read<SyncService>().syncAll();
     }
     if (mounted) Navigator.pop(context);
@@ -559,7 +578,7 @@ class _ComplexEquipmentEditorState extends State<ComplexEquipmentEditor> {
                 hintText: "e.g. Major Lutie Power Cage",
                 border: OutlineInputBorder()
               ),
-              enabled: widget.item == null, 
+              enabled: true, // ALWAYS ENABLED NOW
             ),
             const SizedBox(height: 20),
 
@@ -593,9 +612,9 @@ class _ComplexEquipmentEditorState extends State<ComplexEquipmentEditor> {
                       _MediaButton(icon: Icons.picture_as_pdf, label: "PDF", onTap: _pickPDF),
                     ],
                   ),
-                  if (_selectedFile != null) ...[
+                  if (_selectedData != null) ...[
                     const SizedBox(height: 12),
-                    Text("Selected: ${_selectedFile!.path.split('/').last}", style: const TextStyle(fontSize: 11, color: Colors.blue)),
+                    Text("Selected: ${_selectedFileName ?? 'File'}", style: const TextStyle(fontSize: 11, color: Colors.blue)),
                   ],
                   const SizedBox(height: 16),
                   SizedBox(

@@ -101,7 +101,13 @@ class _ExerciseDetailScreenState extends State<ExerciseDetailScreen> {
 
     final baseUrl = supabaseUrl.endsWith('/') ? supabaseUrl : "$supabaseUrl/";
     final cleanPath = path.startsWith('/') ? path.substring(1) : path;
-    return "${baseUrl}storage/v1/object/public/exercises/$cleanPath"; 
+    
+    // Ensure "storage/v1/object/public/" is present if it's a relative path
+    if (!cleanPath.contains("storage/v1/object/public/")) {
+       return "${baseUrl}storage/v1/object/public/exercises/$cleanPath"; 
+    }
+    
+    return "${baseUrl}$cleanPath"; 
   }
 
   @override
